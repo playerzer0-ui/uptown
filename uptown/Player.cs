@@ -346,6 +346,6 @@ public class Player
         animation.Stretch = visualStretch;
         animation.SpriteEffect = facing < 0 ? SpriteEffects.FlipHorizontally : SpriteEffects.None;
         animation.Draw();
-        Collider.Draw(Color.Red * 0.5f);
+        //Collider.Draw(Color.Red * 0.5f);
     }
 }

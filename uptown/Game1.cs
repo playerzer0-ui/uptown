@@ -45,10 +45,10 @@ namespace uptown
 
             _canvas = new Canvas(GraphicsDevice, Window, CanvasWidth, CanvasHeight);
             _tileMap = new TileMap("graphics/tileset/basic", 8, 8,
-                Path.Combine(AppContext.BaseDirectory, "Content", "maps", "test-map_platforms.csv"));
+                Path.Combine(AppContext.BaseDirectory, "Content", "maps", "test-map2_platforms.csv"));
             var collisions = new CollisionMap("graphics/tileset/collision", 8, 8,
-                Path.Combine(AppContext.BaseDirectory, "Content", "maps", "test-map_collisions.csv"));
-            _player = new Player(collisions, new Vector2(12, 37 * 8));
+                Path.Combine(AppContext.BaseDirectory, "Content", "maps", "test-map2_collisions.csv"));
+            _player = new Player(collisions, new Vector2(3 * 8, 37 * 8));
             _camera = new Camera { Origin = new Vector2(CanvasWidth / 2f, CanvasHeight / 2f) };
             UpdateCamera();
         }
