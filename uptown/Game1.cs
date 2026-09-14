@@ -46,7 +46,7 @@ namespace uptown
 
             _canvas = new Canvas(GraphicsDevice, Window, CanvasWidth, CanvasHeight);
             _modes.Add(ModeId.Play, new PlayMode(CanvasWidth, CanvasHeight));
-            _modes.Add(ModeId.Editor, new EditorMode(CanvasWidth, CanvasHeight, _canvas, SwitchMode));
+            _modes.Add(ModeId.Editor, new EditorMode(SwitchMode));
             _modes.Add(ModeId.Home, new HomeMode());
             SwitchMode(ModeId.Play);
         }
@@ -69,10 +69,17 @@ namespace uptown
 
         protected override void Draw(GameTime gameTime)
         {
-            _canvas.Activate();
-            _activeMode.Draw();
-
-            _canvas.Draw(_spriteBatch);
+            if (CurrentMode == ModeId.Editor)
+            {
+                GraphicsDevice.SetRenderTarget(null);
+                _activeMode.Draw();
+            }
+            else
+            {
+                _canvas.Activate();
+                _activeMode.Draw();
+                _canvas.Draw(_spriteBatch);
+            }
 
             base.Draw(gameTime);
         }

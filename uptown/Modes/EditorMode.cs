@@ -15,9 +15,14 @@ public sealed class EditorMode : GameMode
     private bool terrainSelected;
     private Point? lastPaintCell;
     private bool lastErase;
-    private readonly int viewWidth;
-    private readonly int viewHeight;
-    private readonly Canvas canvas;
+    private int viewWidth;
+    private int viewHeight;
+    private int windowWidth;
+    private int windowHeight;
+    private float uiScale = 1;
+    private static readonly float[] ZoomLevels = { 0.25f, 0.5f, 1f, 2f, 4f, 8f };
+    private int zoomIndex;
+    private int wheelRemainder;
     private readonly Action<ModeId> switchMode;
     private readonly SpriteSheet icons;
     private readonly Texture2D tileset;
@@ -34,11 +39,10 @@ public sealed class EditorMode : GameMode
     private readonly CollisionRect HomeButton;
     private readonly CollisionRect ToggleButton;
 
-    public EditorMode(int viewWidth, int viewHeight, Canvas canvas, Action<ModeId> switchMode)
+    public EditorMode(Action<ModeId> switchMode)
     {
-        this.viewWidth = viewWidth;
-        this.viewHeight = viewHeight;
-        this.canvas = canvas;
+        viewWidth = 320;
+        viewHeight = 180;
         this.switchMode = switchMode;
         icons = new SpriteSheet("graphics/ui/UI_buttons", 5);
         // CollisionRect constructors take center coordinates, not top-left.
@@ -52,15 +56,13 @@ public sealed class EditorMode : GameMode
         pixel.SetData(new[] { Color.White });
         preview = new AutoTileMap("graphics/tileset/basic",
             Path.Combine(AppContext.BaseDirectory, "Content", "maps", "test-map2_platforms.csv"));
-        var area = new Rectangle(SidebarWidth + 16, 36, viewWidth - SidebarWidth - 24, viewHeight - 44);
-        float scale = Math.Min((float)area.Width / (preview.Width * preview.TileSizeX),
-            (float)area.Height / (preview.Height * preview.TileSizeY));
-        camera = new Camera
-        {
-            Origin = Vector2.Zero,
-            Zoom = scale,
-            Position = -new Vector2(area.X, area.Y) / scale
-        };
+        camera = new Camera { Origin = Vector2.Zero };
+        RefreshLayout();
+        float fit = Math.Min((windowWidth - (SidebarWidth + 24) * uiScale) / (preview.Width * 8),
+            (windowHeight - 44 * uiScale) / (preview.Height * 8));
+        while (zoomIndex < ZoomLevels.Length - 1 && ZoomLevels[zoomIndex + 1] <= fit) zoomIndex++;
+        camera.Zoom = ZoomLevels[zoomIndex];
+        camera.Position = -new Vector2((SidebarWidth + 16) * uiScale, 36 * uiScale) / camera.Zoom;
     }
 
     public override void Enter()
@@ -68,6 +70,7 @@ public sealed class EditorMode : GameMode
         previousMouse = Mouse.GetState();
         isPanning = false;
         lastPaintCell = null;
+        wheelRemainder = 0;
     }
 
     public override void Leave() => isPanning = false;
@@ -75,9 +78,10 @@ public sealed class EditorMode : GameMode
     public override void Update(GameTime gameTime)
     {
         preview.Update(gameTime);
+        RefreshLayout();
         MouseState mouse = Mouse.GetState();
-        Vector2 position = canvas.ScreenToCanvas(new Vector2(mouse.X, mouse.Y));
-        pointer = new Point((int)MathF.Floor(position.X), (int)MathF.Floor(position.Y));
+        Vector2 position = new Vector2(mouse.X, mouse.Y);
+        pointer = new Point((int)MathF.Floor(position.X / uiScale), (int)MathF.Floor(position.Y / uiScale));
         bool clicked = mouse.LeftButton == ButtonState.Pressed && previousMouse.LeftButton == ButtonState.Released;
         bool overLevel = new Rectangle(sidebarOpen ? SidebarWidth : 0, 0,
             viewWidth - (sidebarOpen ? SidebarWidth : 0), viewHeight).Contains(pointer)
@@ -89,24 +93,30 @@ public sealed class EditorMode : GameMode
 
         if (isPanning)
         {
-            // Convert both positions with the current canvas scale so resizing
-            // and letterboxing do not change the drag speed.
-            Vector2 previous = canvas.ScreenToCanvas(new Vector2(previousMouse.X, previousMouse.Y));
+            Vector2 previous = new Vector2(previousMouse.X, previousMouse.Y);
             camera.Position -= (position - previous) / camera.Zoom;
         }
         int scroll = mouse.ScrollWheelValue - previousMouse.ScrollWheelValue;
         if (scroll != 0 && overLevel)
         {
-            Vector2 worldUnderCursor = Vector2.Transform(position, Matrix.Invert(camera.Transform()));
-            camera.Zoom = MathHelper.Clamp(camera.Zoom * MathF.Pow(1.2f, scroll / 120f), 0.125f, 8f);
-            camera.Position = worldUnderCursor - position / camera.Zoom;
+            wheelRemainder += scroll;
+            int steps = wheelRemainder / 120;
+            wheelRemainder %= 120;
+            int nextZoom = Math.Clamp(zoomIndex + steps, 0, ZoomLevels.Length - 1);
+            if (nextZoom != zoomIndex)
+            {
+                Vector2 worldUnderCursor = Vector2.Transform(position, Matrix.Invert(WorldTransform()));
+                zoomIndex = nextZoom;
+                camera.Zoom = ZoomLevels[zoomIndex];
+                camera.Position = worldUnderCursor - position / camera.Zoom;
+            }
         }
         previousMouse = mouse;
         if (isPanning) { lastPaintCell = null; return; }
         if (terrainSelected && overLevel && scroll == 0
             && (mouse.LeftButton == ButtonState.Pressed || mouse.RightButton == ButtonState.Pressed))
         {
-            Vector2 world = Vector2.Transform(position, Matrix.Invert(camera.Transform()));
+            Vector2 world = Vector2.Transform(position, Matrix.Invert(WorldTransform()));
             var cell = new Point((int)MathF.Floor(world.X / 8), (int)MathF.Floor(world.Y / 8));
             bool erase = mouse.RightButton == ButtonState.Pressed;
             if (preview.InBounds(cell.X, cell.Y))
@@ -131,13 +141,14 @@ public sealed class EditorMode : GameMode
 
     public override void Draw()
     {
+        RefreshLayout();
         Globals.graphics.GraphicsDevice.Clear(new Color(0, 174, 220));
-        Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp, transformMatrix: camera.Transform());
+        Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp, transformMatrix: WorldTransform());
         preview.Draw();
         Globals.spriteBatch.End();
 
-        // UI is drawn in canvas space, independently of the level view.
-        Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp);
+        // UI uses its own integer scale; terrain renders directly to the window.
+        Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp, transformMatrix: Matrix.CreateScale(uiScale));
         if (sidebarOpen)
         {
             Fill(new Rectangle(0, 0, SidebarWidth, viewHeight), new Color(123, 211, 235));
@@ -154,6 +165,31 @@ public sealed class EditorMode : GameMode
     }
 
     private void Fill(Rectangle rectangle, Color color) => Globals.spriteBatch.Draw(pixel, rectangle, color);
+
+    private Matrix WorldTransform()
+    {
+        Matrix transform = camera.Transform();
+        transform.M41 = MathF.Round(transform.M41);
+        transform.M42 = MathF.Round(transform.M42);
+        return transform;
+    }
+
+    private void RefreshLayout()
+    {
+        var bounds = Globals.graphics.GraphicsDevice.PresentationParameters.Bounds;
+        if (bounds.Width <= 0 || bounds.Height <= 0 || (bounds.Width == windowWidth && bounds.Height == windowHeight)) return;
+        windowWidth = bounds.Width;
+        windowHeight = bounds.Height;
+        uiScale = Math.Max(1, Math.Min(windowWidth / 320, windowHeight / 180));
+        viewWidth = (int)MathF.Ceiling(windowWidth / uiScale);
+        viewHeight = (int)MathF.Ceiling(windowHeight / uiScale);
+        SaveButton.UpdateRect(viewWidth - 76, 16);
+        PlayButton.UpdateRect(viewWidth - 48, 16);
+        HomeButton.UpdateRect(viewWidth - 20, 16);
+        ToggleButton.UpdateRect((sidebarOpen ? SidebarWidth : 0) + 6, viewHeight / 2);
+        isPanning = false;
+        lastPaintCell = null;
+    }
 
     private void PaintStroke(Point from, Point to, bool solid)
     {
