@@ -37,6 +37,8 @@ namespace NodeTesting.models
         public Vector2 Origin;
         public float Rotation = 0f;
         public float Scale = 1f;
+        // Visual deformation only; callers retain independent collision bounds.
+        public Vector2 Stretch = Vector2.One;
         public SpriteEffects SpriteEffect;
 
         protected int FrameWidth;
@@ -228,7 +230,7 @@ namespace NodeTesting.models
                 return;
 
             Globals.spriteBatch.Draw(Texture, Position, Rectangles[FrameIndex], Color,
-                Rotation, Origin, Scale, SpriteEffect, 0f);
+                Rotation, Origin, Stretch * Scale, SpriteEffect, 0f);
         }
 
         /// <summary>
@@ -240,7 +242,7 @@ namespace NodeTesting.models
                 return;
 
             Globals.spriteBatch.Draw(Texture, Position, Rectangles[index], Color,
-                Rotation, Origin, Scale, SpriteEffect, 0f);
+                Rotation, Origin, Stretch * Scale, SpriteEffect, 0f);
         }
 
         /// <summary>

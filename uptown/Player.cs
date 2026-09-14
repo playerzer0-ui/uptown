@@ -8,9 +8,13 @@ namespace uptown;
 
 public class Player
 {
-    private const float WalkSpeed = 80f;
-    private const float JumpSpeed = 150f;
-    private const float Gravity = 500f;
+    private const float WalkSpeed = 90f;
+    private const float JumpSpeed = 105f;
+    private const float Gravity = 900f;
+    private const float RunAcceleration = 1000f;
+    private const float AirControl = 0.65f;
+    private const float JumpHoldDuration = 0.16f;
+    private const float JumpBufferDuration = 0.1f;
     private const float WallSlideSpeed = 30f;
     private const float WallJumpSpeed = 110f;
     private readonly CollisionMap map;
@@ -28,7 +32,11 @@ public class Player
     private float coyoteTime;
     private float wallJumpTime;
     private bool isClimbHopping;
+    private bool isClimbJumping;
     private float climbHopTargetX;
+    private float jumpBuffer;
+    private float jumpHoldTime;
+    private Vector2 visualStretch = Vector2.One;
 
     // Position is the bottom-center of the player, matching the sprite's feet.
     public Vector2 Position { get; private set; }
@@ -61,6 +69,9 @@ public class Player
         float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
         var input = Globals.Input;
         if (input.JustPressed("Respawn")) Respawn();
+        jumpBuffer = input.JustPressed("Jump") ? JumpBufferDuration : Math.Max(0, jumpBuffer - dt);
+        jumpHoldTime = Math.Max(0, jumpHoldTime - dt);
+        visualStretch = Vector2.Lerp(visualStretch, Vector2.One, 1f - MathF.Exp(-18f * dt));
         int moveX = (input.IsPressed("Right") || input.KeyDown(Keys.Right) ? 1 : 0)
                   - (input.IsPressed("Left") || input.KeyDown(Keys.Left) ? 1 : 0);
         int moveY = (input.IsPressed("Down") || input.KeyDown(Keys.Down) ? 1 : 0)
@@ -71,11 +82,12 @@ public class Player
         if (moveY == 0 && Math.Abs(input.LeftStick.Y) > stickDeadzone)
             moveY = -Math.Sign(input.LeftStick.Y);
 
-        IsGrounded = SolidAt(0, 1);
+        IsGrounded = velocity.Y >= 0 && SolidAt(0, 1);
         coyoteTime = IsGrounded ? 0.1f : Math.Max(0, coyoteTime - dt);
         if (IsGrounded) airJumpAvailable = true;
         wallJumpTime = Math.Max(0, wallJumpTime - dt);
         bool wasClimbing = IsClimbing;
+        if (velocity.Y >= 0 || !input.IsPressed("Climb")) isClimbJumping = false;
         if (moveX != 0 && wallJumpTime == 0 && !isClimbHopping) facing = moveX;
         // Only grab real terrain beside the upper body. Feet brushing a ledge
         // and the invisible map boundary must not count as climbable walls.
@@ -83,27 +95,45 @@ public class Player
         // An existing upward climb may finish clearing the ledge with its feet.
         if (wall == 0 && wasClimbing && moveY < 0 && !IsGrounded && SolidAt(facing, 0))
             wall = facing;
-        IsClimbing = input.IsPressed("Climb") && wall != 0 && wallJumpTime == 0 && !isClimbHopping;
+        IsClimbing = input.IsPressed("Climb") && wall != 0 && wallJumpTime == 0
+            && !isClimbHopping && !isClimbJumping;
 
         if (IsClimbing)
         {
+            jumpHoldTime = 0;
             facing = wall;
             velocity = new Vector2(0, moveY * 45f);
         }
         else
         {
             if (wallJumpTime == 0 && !isClimbHopping)
-                velocity.X = Approach(velocity.X, moveX * WalkSpeed, 700f * dt);
-            velocity.Y = Math.Min(velocity.Y + Gravity * dt, 200f);
+            {
+                float acceleration = Math.Abs(velocity.X) > WalkSpeed && Math.Sign(velocity.X) == moveX
+                    ? 400f : RunAcceleration;
+                velocity.X = Approach(velocity.X, moveX * WalkSpeed,
+                    acceleration * (IsGrounded ? 1f : AirControl) * dt);
+            }
+            float gravity = isClimbHopping ? 500f : Gravity;
+            if (!isClimbHopping && input.IsPressed("Jump") && Math.Abs(velocity.Y) < 40f)
+                gravity *= 0.5f;
+            velocity.Y = Math.Min(velocity.Y + gravity * dt, 180f);
+            if (jumpHoldTime > 0 && input.IsPressed("Jump"))
+                velocity.Y = Math.Min(velocity.Y, -JumpSpeed);
         }
 
         // Wall jumps work from either side even without grab input, and take
         // priority over the double jump while airborne beside real terrain.
         int jumpWall = IsClimbing ? wall : !IsGrounded && wallJumpTime == 0 && !isClimbHopping
             ? (CanGrabWall(facing) ? facing : CanGrabWall(-facing) ? -facing : 0) : 0;
-        if (input.JustPressed("Jump") && (coyoteTime > 0 || jumpWall != 0 || airJumpAvailable))
+        if (jumpBuffer > 0 && (coyoteTime > 0 || jumpWall != 0 || airJumpAvailable))
         {
-            if (jumpWall != 0)
+            bool climbJump = jumpWall != 0 && input.IsPressed("Climb");
+            if (climbJump)
+            {
+                velocity.X = 0;
+                remainder.X = 0;
+            }
+            else if (jumpWall != 0)
             {
                 velocity.X = -jumpWall * WallJumpSpeed;
                 remainder.X = 0;
@@ -111,17 +141,15 @@ public class Player
                 wallJumpTime = 0.15f;
             }
             else if (coyoteTime <= 0) airJumpAvailable = false;
-            velocity.Y = -JumpSpeed;
-            isClimbHopping = false;
-            remainder.Y = 0;
-            coyoteTime = 0;
-            IsGrounded = false;
-            IsClimbing = false;
-            jump.Reset();
+            else velocity.X += moveX * 15f;
+            BeginJump();
+            // Keep the upward impulse until the apex instead of immediately
+            // replacing it with the climbing speed on the next frame.
+            isClimbJumping = climbJump;
         }
-        // Releasing jump early makes a shorter hop.
-        if (!input.IsPressed("Jump") && velocity.Y < -60f && !IsClimbing && !isClimbHopping)
-            velocity.Y = -60f;
+        // Release ends the upward hold; gravity then produces a natural short
+        // arc rather than abruptly cutting the launch velocity.
+        if (!input.IsPressed("Jump")) jumpHoldTime = 0;
 
         float horizontalDistance = velocity.X * dt;
         if (isClimbHopping)
@@ -143,6 +171,8 @@ public class Player
             facing = moveX;
             velocity.Y = Math.Min(velocity.Y, WallSlideSpeed);
         }
+        float landingSpeed = velocity.Y;
+        bool wasGrounded = IsGrounded;
         Move(velocity.Y * dt, false);
         // Once the feet clear the wall, carry the player over its edge instead
         // of letting gravity drop them back into the same climbing contact.
@@ -154,6 +184,7 @@ public class Player
                 velocity = new Vector2(facing * 60f, -60f);
                 remainder = Vector2.Zero;
                 isClimbHopping = true;
+                jumpHoldTime = 0;
                 climbHopTargetX = Position.X + facing * 8;
             }
         }
@@ -162,6 +193,15 @@ public class Player
         {
             airJumpAvailable = true;
             isClimbHopping = false;
+            jumpHoldTime = 0;
+            if (!wasGrounded && landingSpeed > 0)
+            {
+                float impact = MathHelper.Clamp(landingSpeed / 180f, 0, 1);
+                visualStretch = new Vector2(1 + impact * 0.22f, 1 - impact * 0.22f);
+            }
+            // Consume a late press on the landing frame, without an idle frame
+            // between landing and jumping. A held button alone never repeats.
+            if (jumpBuffer > 0) BeginJump();
         }
         if (Position.Y > map.Height * map.TileSizeY + 32) Respawn();
         IsWallSliding = CanWallSlide(moveX);
@@ -182,6 +222,19 @@ public class Player
             jump.SetFrame(velocity.Y < -30 ? 0 : velocity.Y > 30 ? 2 : 1);
         else if (!IsClimbing || moveY != 0)
             animation.Update(gameTime);
+    }
+
+    private void BeginJump()
+    {
+        velocity.Y = -JumpSpeed;
+        jumpHoldTime = Globals.Input.IsPressed("Jump") ? JumpHoldDuration : 0;
+        jumpBuffer = coyoteTime = 0;
+        remainder.Y = 0;
+        isClimbHopping = false;
+        isClimbJumping = false;
+        IsGrounded = IsClimbing = IsWallSliding = false;
+        visualStretch = new Vector2(0.85f, 1.15f);
+        jump.Reset();
     }
 
     private bool CanWallSlide(int moveX) =>
@@ -230,7 +283,7 @@ public class Player
             if (SolidAt(horizontal ? step : 0, horizontal ? 0 : step))
             {
                 if (horizontal) { velocity.X = 0; remainder.X = 0; }
-                else { velocity.Y = 0; remainder.Y = 0; }
+                else { velocity.Y = 0; remainder.Y = 0; jumpHoldTime = 0; }
                 break;
             }
             Position += horizontal ? new Vector2(step, 0) : new Vector2(0, step);
@@ -245,7 +298,10 @@ public class Player
         Collider.UpdateRect((int)Position.X, (int)Position.Y - 6);
         velocity = remainder = Vector2.Zero;
         coyoteTime = wallJumpTime = 0;
+        jumpBuffer = jumpHoldTime = 0;
+        visualStretch = Vector2.One;
         isClimbHopping = false;
+        isClimbJumping = false;
         airJumpAvailable = true;
         IsClimbing = false;
         IsWallSliding = false;
@@ -257,6 +313,7 @@ public class Player
     public void Draw()
     {
         animation.Position = Position;
+        animation.Stretch = visualStretch;
         animation.SpriteEffect = facing < 0 ? SpriteEffects.FlipHorizontally : SpriteEffects.None;
         animation.Draw();
     }
