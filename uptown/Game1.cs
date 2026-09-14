@@ -3,7 +3,8 @@ using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using NodeTesting.models;
 using System;
-using System.IO;
+using System.Collections.Generic;
+using uptown.Modes;
 
 namespace uptown
 {
@@ -12,9 +13,9 @@ namespace uptown
         private GraphicsDeviceManager _graphics;
         private SpriteBatch _spriteBatch;
         private Canvas _canvas;
-        private TileMap _tileMap;
-        private Player _player;
-        private Camera _camera;
+        private readonly Dictionary<ModeId, GameMode> _modes = new();
+        private GameMode _activeMode;
+        public ModeId CurrentMode { get; private set; }
         private const int CanvasWidth = 320;
         private const int CanvasHeight = 180;
 
@@ -44,13 +45,10 @@ namespace uptown
             Globals.graphics = _graphics;
 
             _canvas = new Canvas(GraphicsDevice, Window, CanvasWidth, CanvasHeight);
-            _tileMap = new TileMap("graphics/tileset/basic", 8, 8,
-                Path.Combine(AppContext.BaseDirectory, "Content", "maps", "test-map2_platforms.csv"));
-            var collisions = new CollisionMap("graphics/tileset/collision", 8, 8,
-                Path.Combine(AppContext.BaseDirectory, "Content", "maps", "test-map2_collisions.csv"));
-            _player = new Player(collisions, new Vector2(3 * 8, 37 * 8));
-            _camera = new Camera { Origin = new Vector2(CanvasWidth / 2f, CanvasHeight / 2f) };
-            UpdateCamera();
+            _modes.Add(ModeId.Play, new PlayMode(CanvasWidth, CanvasHeight));
+            _modes.Add(ModeId.Editor, new EditorMode(CanvasWidth, CanvasHeight, _canvas, SwitchMode));
+            _modes.Add(ModeId.Home, new HomeMode());
+            SwitchMode(ModeId.Play);
         }
 
         protected override void Update(GameTime gameTime)
@@ -59,9 +57,12 @@ namespace uptown
             if (Keyboard.GetState().IsKeyDown(Keys.Escape))
                 Exit();
 
-            _tileMap.Update(gameTime);
-            _player.Update(gameTime);
-            UpdateCamera();
+            // Skip simulation on a switch frame so navigation input cannot
+            // also trigger an action in the newly entered mode.
+            if (Globals.Input.KeyJustDown(Keys.F1)) SwitchMode(ModeId.Play);
+            else if (Globals.Input.KeyJustDown(Keys.F2)) SwitchMode(ModeId.Editor);
+            else if (Globals.Input.KeyJustDown(Keys.F3)) SwitchMode(ModeId.Home);
+            else _activeMode.Update(gameTime);
 
             base.Update(gameTime);
         }
@@ -69,25 +70,23 @@ namespace uptown
         protected override void Draw(GameTime gameTime)
         {
             _canvas.Activate();
-            GraphicsDevice.Clear(Color.CornflowerBlue);
-
-            _spriteBatch.Begin(samplerState: SamplerState.PointClamp, transformMatrix: _camera.Transform());
-            _tileMap.Draw();
-            _player.Draw();
-            _spriteBatch.End();
+            _activeMode.Draw();
 
             _canvas.Draw(_spriteBatch);
 
             base.Draw(gameTime);
         }
 
-        private void UpdateCamera()
+        public void SwitchMode(ModeId mode)
         {
-            float x = MathHelper.Clamp(_player.Position.X - CanvasWidth / 2f, 0,
-                Math.Max(0, _tileMap.Width * _tileMap.TileSizeX - CanvasWidth));
-            float y = MathHelper.Clamp(_player.Position.Y - CanvasHeight / 2f, 0,
-                Math.Max(0, _tileMap.Height * _tileMap.TileSizeY - CanvasHeight));
-            _camera.Position = new Vector2(MathF.Round(x), MathF.Round(y)) + _camera.Origin;
+            if (!_modes.TryGetValue(mode, out var next))
+                throw new ArgumentOutOfRangeException(nameof(mode));
+            if (ReferenceEquals(next, _activeMode)) return;
+            _activeMode?.Leave();
+            CurrentMode = mode;
+            _activeMode = next;
+            _activeMode.Enter();
+            Window.Title = $"Uptown — {mode} | F1 Play · F2 Editor · F3 Home · Esc Exit";
         }
     }
 }
