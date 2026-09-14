@@ -48,7 +48,7 @@ namespace uptown
                 Path.Combine(AppContext.BaseDirectory, "Content", "maps", "test-map_platforms.csv"));
             var collisions = new CollisionMap("graphics/tileset/collision", 8, 8,
                 Path.Combine(AppContext.BaseDirectory, "Content", "maps", "test-map_collisions.csv"));
-            _player = new Player(collisions, new Vector2(12, 16));
+            _player = new Player(collisions, new Vector2(12, 37 * 8));
             _camera = new Camera { Origin = new Vector2(CanvasWidth / 2f, CanvasHeight / 2f) };
             UpdateCamera();
         }

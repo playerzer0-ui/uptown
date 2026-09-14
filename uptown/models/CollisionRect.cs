@@ -39,6 +39,17 @@ namespace NodeTesting.models
         /// Gets the internal <see cref="Rectangle"/> that defines this collider's bounds.
         /// </summary>
         public Rectangle Rect => rect;
+
+        /// <summary>Changes the hitbox size while preserving its current center.</summary>
+        public void Resize(int width, int height)
+        {
+            if (width <= 0 || height <= 0)
+                throw new ArgumentOutOfRangeException(nameof(width), "Collider dimensions must be positive.");
+            Point center = rect.Center;
+            this.width = width;
+            this.height = height;
+            rect = new Rectangle(center.X - width / 2, center.Y - height / 2, width, height);
+        }
         public bool IsStatic { get; set; } = false;
 
         public Vector2 Center => new Vector2(Pos.X + this.width / 2f, Pos.Y + this.height / 2f);

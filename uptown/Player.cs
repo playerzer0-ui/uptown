@@ -24,6 +24,8 @@ public class Player
     private readonly SpriteAnimation push = new("graphics/player/push", 2, 6);
     private readonly SpriteAnimation climb = new("graphics/player/climb", 2, 8);
     private readonly SpriteAnimation jump = new("graphics/player/jump", 3, 8);
+    private readonly SpriteAnimation crouch = new("graphics/player/crouch", 1, 1);
+    private readonly SpriteAnimation crawl = new("graphics/player/crawl", 2, 8);
     private SpriteAnimation animation;
     private Vector2 remainder;
     private Vector2 velocity;
@@ -43,6 +45,7 @@ public class Player
     public bool IsGrounded { get; private set; }
     public bool IsClimbing { get; private set; }
     public bool IsWallSliding { get; private set; }
+    public bool IsCrouching { get; private set; }
     public CollisionRect Collider { get; }
 
     public Player(CollisionMap map, Vector2 spawn)
@@ -52,7 +55,7 @@ public class Player
         Position = spawn;
         Collider = new CollisionRect((int)spawn.X, (int)spawn.Y - 6, 8, 12);
         animation = idle;
-        foreach (var sprite in new[] { idle, walk, push, climb, jump })
+        foreach (var sprite in new[] { idle, walk, push, climb, jump, crouch, crawl })
             sprite.Origin = new Vector2(8, 16);
 
         Globals.Input.Register("Left", Keys.A, Buttons.DPadLeft);
@@ -83,6 +86,10 @@ public class Player
             moveY = -Math.Sign(input.LeftStick.Y);
 
         IsGrounded = velocity.Y >= 0 && SolidAt(0, 1);
+        if (IsGrounded && moveY > 0 && !IsClimbing)
+            SetCrouching(true);
+        else if (IsCrouching)
+            TryStand();
         coyoteTime = IsGrounded ? 0.1f : Math.Max(0, coyoteTime - dt);
         if (IsGrounded) airJumpAvailable = true;
         wallJumpTime = Math.Max(0, wallJumpTime - dt);
@@ -96,7 +103,7 @@ public class Player
         if (wall == 0 && wasClimbing && moveY < 0 && !IsGrounded && SolidAt(facing, 0))
             wall = facing;
         IsClimbing = input.IsPressed("Climb") && wall != 0 && wallJumpTime == 0
-            && !isClimbHopping && !isClimbJumping;
+            && !isClimbHopping && !isClimbJumping && !IsCrouching;
 
         if (IsClimbing)
         {
@@ -110,7 +117,7 @@ public class Player
             {
                 float acceleration = Math.Abs(velocity.X) > WalkSpeed && Math.Sign(velocity.X) == moveX
                     ? 400f : RunAcceleration;
-                velocity.X = Approach(velocity.X, moveX * WalkSpeed,
+                velocity.X = Approach(velocity.X, moveX * (IsCrouching ? 30f : WalkSpeed),
                     acceleration * (IsGrounded ? 1f : AirControl) * dt);
             }
             float gravity = isClimbHopping ? 500f : Gravity;
@@ -125,7 +132,7 @@ public class Player
         // priority over the double jump while airborne beside real terrain.
         int jumpWall = IsClimbing ? wall : !IsGrounded && wallJumpTime == 0 && !isClimbHopping
             ? (CanGrabWall(facing) ? facing : CanGrabWall(-facing) ? -facing : 0) : 0;
-        if (jumpBuffer > 0 && (coyoteTime > 0 || jumpWall != 0 || airJumpAvailable))
+        if (jumpBuffer > 0 && (coyoteTime > 0 || jumpWall != 0 || airJumpAvailable) && TryStand())
         {
             bool climbJump = jumpWall != 0 && input.IsPressed("Climb");
             if (climbJump)
@@ -201,7 +208,7 @@ public class Player
             }
             // Consume a late press on the landing frame, without an idle frame
             // between landing and jumping. A held button alone never repeats.
-            if (jumpBuffer > 0) BeginJump();
+            if (jumpBuffer > 0 && TryStand()) BeginJump();
         }
         if (Position.Y > map.Height * map.TileSizeY + 32) Respawn();
         IsWallSliding = CanWallSlide(moveX);
@@ -209,14 +216,18 @@ public class Player
         // Input and wall contact remain stable even when collision resolution
         // alternates between zero velocity and subpixel acceleration.
         bool isPushing = IsGrounded && moveX != 0 && SolidAt(moveX, 0);
-        var next = IsClimbing || IsWallSliding ? climb : !IsGrounded ? jump : isPushing ? push
+        bool isCrawling = IsCrouching && IsGrounded && Math.Abs(velocity.X) > 1
+            && !SolidAt(Math.Sign(velocity.X), 0);
+        var next = IsCrouching ? (isCrawling ? crawl : crouch) : IsClimbing || IsWallSliding ? climb : !IsGrounded ? jump : isPushing ? push
             : Math.Abs(velocity.X) > 1 ? walk : idle;
         if (next != animation)
         {
             animation = next;
             animation.Reset();
         }
-        if (IsWallSliding)
+        if (animation == crouch)
+            crouch.SetFrame(0);
+        else if (IsWallSliding)
             climb.SetFrame(0);
         else if (animation == jump)
             jump.SetFrame(velocity.Y < -30 ? 0 : velocity.Y > 30 ? 2 : 1);
@@ -238,7 +249,7 @@ public class Player
     }
 
     private bool CanWallSlide(int moveX) =>
-        !IsGrounded && !IsClimbing && !isClimbHopping && wallJumpTime == 0
+        !IsGrounded && !IsClimbing && !IsCrouching && !isClimbHopping && wallJumpTime == 0
         && velocity.Y > 0 && moveX != 0 && CanGrabWall(moveX);
 
     private bool SolidAt(int dx, int dy)
@@ -287,7 +298,7 @@ public class Player
                 break;
             }
             Position += horizontal ? new Vector2(step, 0) : new Vector2(0, step);
-            Collider.UpdateRect((int)Position.X, (int)Position.Y - 6);
+            SyncCollider();
             pixels -= step;
         }
     }
@@ -295,7 +306,7 @@ public class Player
     private void Respawn()
     {
         Position = spawn;
-        Collider.UpdateRect((int)Position.X, (int)Position.Y - 6);
+        SetCrouching(false);
         velocity = remainder = Vector2.Zero;
         coyoteTime = wallJumpTime = 0;
         jumpBuffer = jumpHoldTime = 0;
@@ -310,11 +321,31 @@ public class Player
     private static float Approach(float value, float target, float amount) =>
         value < target ? Math.Min(value + amount, target) : Math.Max(value - amount, target);
 
+    private void SyncCollider() =>
+        Collider.UpdateRect((int)Position.X, (int)Position.Y - Collider.Rect.Height / 2);
+
+    private void SetCrouching(bool crouching)
+    {
+        IsCrouching = crouching;
+        Collider.Resize(8, crouching ? 6 : 12);
+        SyncCollider();
+    }
+
+    private bool TryStand()
+    {
+        if (!IsCrouching) return true;
+        SetCrouching(false);
+        if (!map.CheckCollision(Collider)) return true;
+        SetCrouching(true);
+        return false;
+    }
+
     public void Draw()
     {
         animation.Position = Position;
         animation.Stretch = visualStretch;
         animation.SpriteEffect = facing < 0 ? SpriteEffects.FlipHorizontally : SpriteEffects.None;
         animation.Draw();
+        Collider.Draw(Color.Red * 0.5f);
     }
 }
