@@ -8,21 +8,20 @@ namespace uptown.Modes;
 
 public sealed class PlayMode : GameMode
 {
-    private readonly TileMap tileMap;
+    private readonly AutoTileMap tileMap;
     private readonly Player player;
     private readonly Camera camera;
     private readonly int viewWidth;
     private readonly int viewHeight;
 
-    public PlayMode(int viewWidth, int viewHeight)
+    public PlayMode(int viewWidth, int viewHeight, LevelData level)
     {
         this.viewWidth = viewWidth;
         this.viewHeight = viewHeight;
-        tileMap = new TileMap("graphics/tileset/basic", 8, 8,
-            Path.Combine(AppContext.BaseDirectory, "Content", "maps", "test-map2_platforms.csv"));
+        tileMap = new AutoTileMap("graphics/tileset/basic", level.CreateGrid(false));
         var collisions = new CollisionMap("graphics/tileset/collision", 8, 8,
-            Path.Combine(AppContext.BaseDirectory, "Content", "maps", "test-map2_collisions.csv"));
-        player = new Player(collisions, new Vector2(3 * 8, 37 * 8));
+            level.CreateGrid(true));
+        player = new Player(collisions, new Vector2(level.SpawnX, level.SpawnY));
         camera = new Camera { Origin = new Vector2(viewWidth / 2f, viewHeight / 2f) };
         UpdateCamera();
     }

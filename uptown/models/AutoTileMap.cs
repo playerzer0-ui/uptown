@@ -5,7 +5,7 @@ namespace NodeTesting.models;
 // Basic terrain atlas: 3x3 outer tiles, plus inner DR/DL/UR/UL at IDs 3/4/8/9.
 public sealed class AutoTileMap : Map
 {
-    private readonly Rectangle[,,] quarters;
+    private Rectangle[,,] quarters;
     private static readonly int[] Outer = { 0, 2, 10, 12 };
     private static readonly int[] Sides = { 5, 7, 5, 7 };
     private static readonly int[] Caps = { 1, 1, 11, 11 };
@@ -19,8 +19,36 @@ public sealed class AutoTileMap : Map
             for (int x = 0; x < Width; x++) Refresh(x, y);
     }
 
+    public AutoTileMap(string texturePath, int[,] grid) : base(texturePath, 8, 8)
+    {
+        MapData = (int[,])grid.Clone();
+        MapHeight = grid.GetLength(0);
+        MapWidth = grid.GetLength(1);
+        quarters = new Rectangle[Height, Width, 4];
+        for (int y = 0; y < Height; y++)
+            for (int x = 0; x < Width; x++) Refresh(x, y);
+    }
+
     public bool InBounds(int x, int y) => x >= 0 && y >= 0 && x < Width && y < Height;
     public bool Occupied(int x, int y) => InBounds(x, y) && MapData[y, x] >= 0;
+
+    // Extension only: preserve every existing cell and leave new space empty.
+    public void Expand(int width, int height)
+    {
+        if (width < Width || height < Height || (long)width * height > 1048576)
+            throw new System.ArgumentOutOfRangeException(nameof(width), "Expansion must preserve the level and stay within 1,048,576 cells.");
+        if (width == Width && height == Height) return;
+        var grid = new int[height, width];
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+                grid[y, x] = InBounds(x, y) ? MapData[y, x] : -1;
+        MapData = grid;
+        MapWidth = width;
+        MapHeight = height;
+        quarters = new Rectangle[height, width, 4];
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++) Refresh(x, y);
+    }
 
     public void Paint(int x, int y, bool solid)
     {

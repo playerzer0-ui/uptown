@@ -1,0 +1,76 @@
+using System;
+using System.IO;
+using System.Text.Json;
+using Microsoft.Xna.Framework;
+using NodeTesting.models;
+
+namespace uptown;
+
+public sealed class LevelData
+{
+    public int Version { get; set; } = 1;
+    public string Name { get; set; } = "Untitled";
+    public string Tileset { get; set; } = "basic";
+    public int TileSize { get; set; } = 8;
+    public int Width { get; set; }
+    public int Height { get; set; }
+    public int SpawnX { get; set; }
+    public int SpawnY { get; set; }
+    public bool HasSpawn { get; set; }
+    public int[][] Terrain { get; set; }
+
+    public static LevelData Capture(AutoTileMap map, Point? spawn)
+    {
+        var data = new LevelData { Width = map.Width, Height = map.Height };
+        data.Terrain = new int[data.Height][];
+        for (int y = 0; y < data.Height; y++)
+        {
+            data.Terrain[y] = new int[data.Width];
+            for (int x = 0; x < data.Width; x++) data.Terrain[y][x] = map.Occupied(x, y) ? 1 : 0;
+        }
+        if (!spawn.HasValue)
+        {
+            for (int y = data.Height - 1; y >= 2 && !spawn.HasValue; y--)
+                for (int x = 0; x < data.Width; x++)
+                    if (map.Occupied(x, y) && !map.Occupied(x, y - 1) && !map.Occupied(x, y - 2))
+                    { spawn = new Point(x * 8 + 4, y * 8); break; }
+        }
+        data.HasSpawn = spawn.HasValue;
+        data.SpawnX = spawn?.X ?? 12;
+        data.SpawnY = spawn?.Y ?? 16;
+        return data;
+    }
+
+    public int[,] CreateGrid(bool collision)
+    {
+        var grid = new int[Height, Width];
+        for (int y = 0; y < Height; y++)
+            for (int x = 0; x < Width; x++) grid[y, x] = Terrain[y][x] == 1 ? (collision ? 0 : 6) : -1;
+        return grid;
+    }
+
+    public bool ValidSpawn()
+    {
+        if (!HasSpawn || SpawnX < 4 || SpawnX > Width * 8 - 4 || SpawnY < 12 || SpawnY > Height * 8) return false;
+        for (int y = (SpawnY - 12) / 8; y <= (SpawnY - 1) / 8; y++)
+            for (int x = (SpawnX - 4) / 8; x <= (SpawnX + 3) / 8; x++)
+                if (Terrain[y][x] != 0) return false;
+        return true;
+    }
+
+    public static string SaveFolder()
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
+            if (File.Exists(Path.Combine(dir.FullName, "uptown.csproj")))
+                return Path.Combine(dir.FullName, "Levels");
+        return Path.Combine(AppContext.BaseDirectory, "Levels");
+    }
+
+    public void Save(string path)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path));
+        string temp = path + ".tmp";
+        File.WriteAllText(temp, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+        File.Move(temp, path, true);
+    }
+}

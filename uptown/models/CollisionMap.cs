@@ -1,4 +1,4 @@
-﻿using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using System.Collections.Generic;
 
@@ -12,6 +12,16 @@ namespace NodeTesting.models
             : base(texturePath, tileWidth, tileHeight)
         {
             LoadCSV(csvPath);
+            _collisionRects = new List<CollisionRect>();
+            BuildCollisionRectangles();
+        }
+
+        public CollisionMap(string texturePath, int tileWidth, int tileHeight, int[,] grid)
+            : base(texturePath, tileWidth, tileHeight)
+        {
+            MapData = (int[,])grid.Clone();
+            MapHeight = grid.GetLength(0);
+            MapWidth = grid.GetLength(1);
             _collisionRects = new List<CollisionRect>();
             BuildCollisionRectangles();
         }

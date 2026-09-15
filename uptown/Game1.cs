@@ -1,4 +1,4 @@
-﻿using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using NodeTesting.models;
@@ -45,10 +45,9 @@ namespace uptown
             Globals.graphics = _graphics;
 
             _canvas = new Canvas(GraphicsDevice, Window, CanvasWidth, CanvasHeight);
-            _modes.Add(ModeId.Play, new PlayMode(CanvasWidth, CanvasHeight));
-            _modes.Add(ModeId.Editor, new EditorMode(SwitchMode));
+            _modes.Add(ModeId.Editor, new EditorMode(SwitchMode, message => Window.Title = message));
             _modes.Add(ModeId.Home, new HomeMode());
-            SwitchMode(ModeId.Play);
+            SwitchMode(ModeId.Editor);
         }
 
         protected override void Update(GameTime gameTime)
@@ -86,6 +85,16 @@ namespace uptown
 
         public void SwitchMode(ModeId mode)
         {
+            if (mode == ModeId.Play && CurrentMode != ModeId.Play)
+            {
+                var data = ((EditorMode)_modes[ModeId.Editor]).Capture();
+                if (!data.ValidSpawn())
+                {
+                    Window.Title = "Paint a platform first, or set a clear spawn with P + click.";
+                    return;
+                }
+                _modes[ModeId.Play] = new PlayMode(CanvasWidth, CanvasHeight, data);
+            }
             if (!_modes.TryGetValue(mode, out var next))
                 throw new ArgumentOutOfRangeException(nameof(mode));
             if (ReferenceEquals(next, _activeMode)) return;

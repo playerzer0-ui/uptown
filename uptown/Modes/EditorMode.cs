@@ -11,6 +11,11 @@ namespace uptown.Modes;
 public sealed class EditorMode : GameMode
 {
     private readonly AutoTileMap preview;
+    private readonly Action<string> showStatus;
+    private Point? spawn;
+    private string savePath;
+    private LevelData snapshot;
+    public LevelData Capture() => LevelData.Capture(preview, spawn);
     private readonly CollisionRect TerrainButton;
     private bool terrainSelected;
     private Point? lastPaintCell;
@@ -20,8 +25,9 @@ public sealed class EditorMode : GameMode
     private int windowWidth;
     private int windowHeight;
     private float uiScale = 1;
-    private static readonly float[] ZoomLevels = { 0.25f, 0.5f, 1f, 2f, 4f, 8f };
+    private static readonly float[] ZoomLevels = { 0.0625f, 0.125f, 0.25f, 0.5f, 1f, 2f, 4f, 8f };
     private int zoomIndex;
+    private bool fittedView = true;
     private int wheelRemainder;
     private readonly Action<ModeId> switchMode;
     private readonly SpriteSheet icons;
@@ -39,11 +45,12 @@ public sealed class EditorMode : GameMode
     private readonly CollisionRect HomeButton;
     private readonly CollisionRect ToggleButton;
 
-    public EditorMode(Action<ModeId> switchMode)
+    public EditorMode(Action<ModeId> switchMode, Action<string> showStatus)
     {
         viewWidth = 320;
         viewHeight = 180;
         this.switchMode = switchMode;
+        this.showStatus = showStatus;
         icons = new SpriteSheet("graphics/ui/UI_buttons", 5);
         // CollisionRect constructors take center coordinates, not top-left.
         SaveButton = new CollisionRect(viewWidth - 76, 16, ButtonSize, ButtonSize);
@@ -54,15 +61,14 @@ public sealed class EditorMode : GameMode
         tileset = Globals.Content.Load<Texture2D>("graphics/tileset/basic");
         pixel = new Texture2D(Globals.graphics.GraphicsDevice, 1, 1);
         pixel.SetData(new[] { Color.White });
-        preview = new AutoTileMap("graphics/tileset/basic",
-            Path.Combine(AppContext.BaseDirectory, "Content", "maps", "test-map2_platforms.csv"));
+        var blank = new int[80, 400];
+        for (int y = 0; y < 80; y++)
+            for (int x = 0; x < 400; x++) blank[y, x] = -1;
+        preview = new AutoTileMap("graphics/tileset/basic", blank);
+        snapshot = Capture();
         camera = new Camera { Origin = Vector2.Zero };
         RefreshLayout();
-        float fit = Math.Min((windowWidth - (SidebarWidth + 24) * uiScale) / (preview.Width * 8),
-            (windowHeight - 44 * uiScale) / (preview.Height * 8));
-        while (zoomIndex < ZoomLevels.Length - 1 && ZoomLevels[zoomIndex + 1] <= fit) zoomIndex++;
-        camera.Zoom = ZoomLevels[zoomIndex];
-        camera.Position = -new Vector2((SidebarWidth + 16) * uiScale, 36 * uiScale) / camera.Zoom;
+        FitLevel();
     }
 
     public override void Enter()
@@ -78,6 +84,11 @@ public sealed class EditorMode : GameMode
     public override void Update(GameTime gameTime)
     {
         preview.Update(gameTime);
+        bool control = Globals.Input.KeyDown(Keys.LeftControl) || Globals.Input.KeyDown(Keys.RightControl);
+        if (control && Globals.Input.KeyJustDown(Keys.S)) SaveLevel();
+        if (control && Globals.Input.KeyJustDown(Keys.Right)) ExpandLevel(40, 0);
+        if (control && Globals.Input.KeyJustDown(Keys.Down)) ExpandLevel(0, 20);
+        if (Globals.Input.KeyJustDown(Keys.F)) FitLevel();
         RefreshLayout();
         MouseState mouse = Mouse.GetState();
         Vector2 position = new Vector2(mouse.X, mouse.Y);
@@ -94,6 +105,7 @@ public sealed class EditorMode : GameMode
         if (isPanning)
         {
             Vector2 previous = new Vector2(previousMouse.X, previousMouse.Y);
+            if (position != previous) fittedView = false;
             camera.Position -= (position - previous) / camera.Zoom;
         }
         int scroll = mouse.ScrollWheelValue - previousMouse.ScrollWheelValue;
@@ -106,6 +118,7 @@ public sealed class EditorMode : GameMode
             if (nextZoom != zoomIndex)
             {
                 Vector2 worldUnderCursor = Vector2.Transform(position, Matrix.Invert(WorldTransform()));
+                fittedView = false;
                 zoomIndex = nextZoom;
                 camera.Zoom = ZoomLevels[zoomIndex];
                 camera.Position = worldUnderCursor - position / camera.Zoom;
@@ -113,6 +126,23 @@ public sealed class EditorMode : GameMode
         }
         previousMouse = mouse;
         if (isPanning) { lastPaintCell = null; return; }
+        if (overLevel && Globals.Input.KeyDown(Keys.P))
+        {
+            lastPaintCell = null;
+            if (clicked)
+            {
+                var world = Vector2.Transform(position, Matrix.Invert(WorldTransform()));
+                var proposed = new Point((int)MathF.Floor(world.X / 8) * 8 + 4,
+                    ((int)MathF.Floor(world.Y / 8) + 1) * 8);
+                if (LevelData.Capture(preview, proposed).ValidSpawn())
+                {
+                    spawn = proposed;
+                    snapshot = Capture();
+                }
+                else showStatus("Spawn needs 8x12 pixels of clear space inside the level.");
+            }
+            return;
+        }
         if (terrainSelected && overLevel && scroll == 0
             && (mouse.LeftButton == ButtonState.Pressed || mouse.RightButton == ButtonState.Pressed))
         {
@@ -132,9 +162,13 @@ public sealed class EditorMode : GameMode
         if (sidebarOpen && TerrainButton.Contains(pointer)) terrainSelected = true;
         else if (ToggleButton.Contains(pointer))
         {
+            Vector2 center = camera.Position + ViewCenter() / camera.Zoom;
             sidebarOpen = !sidebarOpen;
+            if (fittedView) FitLevel();
+            else camera.Position = center - ViewCenter() / camera.Zoom;
             ToggleButton.UpdateRect((sidebarOpen ? SidebarWidth : 0) + 6, viewHeight / 2);
         }
+        else if (SaveButton.Contains(pointer)) SaveLevel();
         else if (PlayButton.Contains(pointer)) switchMode(ModeId.Play);
         else if (HomeButton.Contains(pointer)) switchMode(ModeId.Home);
     }
@@ -145,6 +179,24 @@ public sealed class EditorMode : GameMode
         Globals.graphics.GraphicsDevice.Clear(new Color(0, 174, 220));
         Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp, transformMatrix: WorldTransform());
         preview.Draw();
+
+        if (snapshot.HasSpawn)
+            Fill(new Rectangle(snapshot.SpawnX - 4, snapshot.SpawnY - 12, 8, 12),
+                snapshot.ValidSpawn() ? Color.Yellow * 0.7f : Color.Red * 0.7f);
+        Globals.spriteBatch.End();
+
+        // Draw the level outline in screen pixels so zoom cannot make it disappear.
+        var transform = WorldTransform();
+        Vector2 topLeft = Vector2.Transform(Vector2.Zero, transform);
+        Vector2 bottomRight = Vector2.Transform(new Vector2(preview.Width * 8, preview.Height * 8), transform);
+        int left = (int)MathF.Round(topLeft.X), top = (int)MathF.Round(topLeft.Y);
+        int right = (int)MathF.Round(bottomRight.X), bottom = (int)MathF.Round(bottomRight.Y);
+        const int thickness = 3;
+        Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp);
+        Fill(new Rectangle(left - thickness, top - thickness, right - left + thickness * 2, thickness), Color.White);
+        Fill(new Rectangle(left - thickness, bottom, right - left + thickness * 2, thickness), Color.White);
+        Fill(new Rectangle(left - thickness, top, thickness, bottom - top), Color.White);
+        Fill(new Rectangle(right, top, thickness, bottom - top), Color.White);
         Globals.spriteBatch.End();
 
         // UI uses its own integer scale; terrain renders directly to the window.
@@ -157,11 +209,28 @@ public sealed class EditorMode : GameMode
             Fill(new Rectangle(9, 9, 30, 30), new Color(24, 100, 127));
             Globals.spriteBatch.Draw(tileset, new Rectangle(12, 12, 24, 24), new Rectangle(8, 0, 8, 8), Color.White);
         }
-        DrawButton(SaveButton, 1, new Color(125, 151, 161), false);
+        DrawButton(SaveButton, 1, new Color(125, 151, 161));
         DrawButton(PlayButton, 0, new Color(225, 69, 59));
         DrawButton(HomeButton, 2, new Color(149, 213, 112));
         DrawButton(ToggleButton, sidebarOpen ? 3 : 4, new Color(24, 100, 127));
         Globals.spriteBatch.End();
+    }
+
+    public void SaveLevel()
+    {
+        try
+        {
+            if (savePath == null)
+                savePath = Path.Combine(LevelData.SaveFolder(), "Level-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + ".uptown");
+            var data = Capture();
+            data.Name = Path.GetFileNameWithoutExtension(savePath);
+            data.Save(savePath);
+            showStatus("Saved: " + savePath);
+        }
+        catch (Exception error) when (error is IOException || error is UnauthorizedAccessException)
+        {
+            showStatus("Save failed: " + error.Message);
+        }
     }
 
     private void Fill(Rectangle rectangle, Color color) => Globals.spriteBatch.Draw(pixel, rectangle, color);
@@ -178,17 +247,57 @@ public sealed class EditorMode : GameMode
     {
         var bounds = Globals.graphics.GraphicsDevice.PresentationParameters.Bounds;
         if (bounds.Width <= 0 || bounds.Height <= 0 || (bounds.Width == windowWidth && bounds.Height == windowHeight)) return;
+        Vector2 center = camera.Position + ViewCenter() / camera.Zoom;
+        bool hadLayout = windowWidth > 0;
         windowWidth = bounds.Width;
         windowHeight = bounds.Height;
         uiScale = Math.Max(1, Math.Min(windowWidth / 320, windowHeight / 180));
         viewWidth = (int)MathF.Ceiling(windowWidth / uiScale);
         viewHeight = (int)MathF.Ceiling(windowHeight / uiScale);
+        if (hadLayout)
+        {
+            if (fittedView) FitLevel();
+            else camera.Position = center - ViewCenter() / camera.Zoom;
+        }
         SaveButton.UpdateRect(viewWidth - 76, 16);
         PlayButton.UpdateRect(viewWidth - 48, 16);
         HomeButton.UpdateRect(viewWidth - 20, 16);
         ToggleButton.UpdateRect((sidebarOpen ? SidebarWidth : 0) + 6, viewHeight / 2);
         isPanning = false;
         lastPaintCell = null;
+    }
+
+    private Vector2 ViewCenter()
+    {
+        float left = (sidebarOpen ? SidebarWidth + 16 : 16) * uiScale;
+        return new Vector2((left + windowWidth - 8 * uiScale) / 2,
+            (36 * uiScale + windowHeight - 8 * uiScale) / 2);
+    }
+
+    private void FitLevel()
+    {
+        float left = (sidebarOpen ? SidebarWidth + 16 : 16) * uiScale;
+        float fit = Math.Min(Math.Max(1, windowWidth - left - 8 * uiScale) / (preview.Width * 8),
+            Math.Max(1, windowHeight - 44 * uiScale) / (preview.Height * 8));
+        zoomIndex = 0;
+        while (zoomIndex < ZoomLevels.Length - 1 && ZoomLevels[zoomIndex + 1] <= fit) zoomIndex++;
+        camera.Zoom = ZoomLevels[zoomIndex];
+        camera.Position = new Vector2(preview.Width * 4, preview.Height * 4) - ViewCenter() / camera.Zoom;
+        fittedView = true;
+        lastPaintCell = null;
+    }
+
+    private void ExpandLevel(int columns, int rows)
+    {
+        try
+        {
+            preview.Expand(preview.Width + columns, preview.Height + rows);
+            snapshot = Capture();
+            lastPaintCell = null;
+            FitLevel();
+            showStatus($"Level: {preview.Width} x {preview.Height} tiles | Ctrl+Right: wider | Ctrl+Down: taller | F: fit");
+        }
+        catch (ArgumentOutOfRangeException error) { showStatus(error.Message); }
     }
 
     private void PaintStroke(Point from, Point to, bool solid)
@@ -200,7 +309,7 @@ public sealed class EditorMode : GameMode
         while (true)
         {
             preview.Paint(from.X, from.Y, solid);
-            if (from == to) break;
+            if (from == to) { snapshot = Capture(); break; }
             int twice = 2 * error;
             if (twice >= dy) { error += dy; from.X += sx; }
             if (twice <= dx) { error += dx; from.Y += sy; }
