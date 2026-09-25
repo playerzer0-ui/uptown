@@ -51,33 +51,38 @@ namespace NodeTesting.models
         /// <summary>
         /// Checks if a CollisionRect collides with any collision tiles (0 values)
         /// </summary>
-        public bool CheckCollision(CollisionRect collider)
-        {
-            foreach (CollisionRect tileRect in _collisionRects)
-            {
-                if (collider.Intersects(tileRect))
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
+        public bool CheckCollision(CollisionRect collider) => CheckCollision(collider.Rect);
 
         /// <summary>
         /// Checks if a standard Rectangle collides with any collision tiles (0 values)
         /// </summary>
         public bool CheckCollision(Rectangle rectangle)
         {
-            // Create a temporary CollisionRect from the rectangle
-            CollisionRect tempCollider = new CollisionRect(
-                rectangle.Center.X,
-                rectangle.Center.Y,
-                rectangle.Width,
-                rectangle.Height
-            );
+            if (rectangle.Width <= 0 || rectangle.Height <= 0) return false;
 
-            return CheckCollision(tempCollider);
+            // Only look at the grid cells under the rectangle.
+            int leftTile = FloorDiv(rectangle.Left, TileWidth);
+            int rightTile = FloorDiv(rectangle.Right - 1, TileWidth);
+            int topTile = FloorDiv(rectangle.Top, TileHeight);
+            int bottomTile = FloorDiv(rectangle.Bottom - 1, TileHeight);
+
+            for (int y = topTile; y <= bottomTile; y++)
+                for (int x = leftTile; x <= rightTile; x++)
+                    if (IsSolidTile(x, y)) return true;
+            return false;
         }
+
+        /// <summary>
+        /// Checks if a world-space pixel lies inside a collision tile (0 values)
+        /// </summary>
+        public bool IsSolidAt(int x, int y) => IsSolidTile(FloorDiv(x, TileWidth), FloorDiv(y, TileHeight));
+
+        private bool IsSolidTile(int x, int y) =>
+            x >= 0 && x < MapWidth && y >= 0 && y < MapHeight && MapData[y, x] == 0;
+
+        // Integer division that rounds toward negative infinity, so -1 / 8 is tile -1, not 0.
+        private static int FloorDiv(int value, int divisor) =>
+            value >= 0 ? value / divisor : (value - divisor + 1) / divisor;
 
         /// <summary>
         /// Gets all collision rectangles for advanced collision handling
@@ -95,10 +100,10 @@ namespace NodeTesting.models
             List<Point> intersections = new List<Point>();
 
             // Calculate which tiles the rectangle overlaps
-            int leftTile = target.Left / TileWidth;
-            int rightTile = (target.Right - 1) / TileWidth;
-            int topTile = target.Top / TileHeight;
-            int bottomTile = (target.Bottom - 1) / TileHeight;
+            int leftTile = FloorDiv(target.Left, TileWidth);
+            int rightTile = FloorDiv(target.Right - 1, TileWidth);
+            int topTile = FloorDiv(target.Top, TileHeight);
+            int bottomTile = FloorDiv(target.Bottom - 1, TileHeight);
 
             for (int x = leftTile; x <= rightTile; x++)
             {
@@ -125,25 +130,18 @@ namespace NodeTesting.models
         public void ResolveCollisionHorizontal(ref Rectangle rect, float velocityX)
         {
             List<Point> intersectingTiles = GetIntersectingTiles(rect);
+            if (intersectingTiles.Count == 0 || velocityX == 0) return;
 
+            // Snap against the nearest tile in the direction of travel.
+            int x = rect.X;
             foreach (Point tilePos in intersectingTiles)
             {
-                Rectangle tileRect = new Rectangle(
-                    tilePos.X * TileWidth,
-                    tilePos.Y * TileHeight,
-                    TileWidth,
-                    TileHeight
-                );
-
-                if (velocityX > 0) // Moving right
-                {
-                    rect.X = tileRect.Left - rect.Width;
-                }
-                else if (velocityX < 0) // Moving left
-                {
-                    rect.X = tileRect.Right;
-                }
+                if (velocityX > 0) // Moving right: the leftmost tile edge wins
+                    x = System.Math.Min(x, tilePos.X * TileWidth - rect.Width);
+                else // Moving left: the rightmost tile edge wins
+                    x = System.Math.Max(x, (tilePos.X + 1) * TileWidth);
             }
+            rect.X = x;
         }
 
         /// <summary>
@@ -152,25 +150,18 @@ namespace NodeTesting.models
         public void ResolveCollisionVertical(ref Rectangle rect, float velocityY)
         {
             List<Point> intersectingTiles = GetIntersectingTiles(rect);
+            if (intersectingTiles.Count == 0 || velocityY == 0) return;
 
+            // Snap against the nearest tile in the direction of travel.
+            int y = rect.Y;
             foreach (Point tilePos in intersectingTiles)
             {
-                Rectangle tileRect = new Rectangle(
-                    tilePos.X * TileWidth,
-                    tilePos.Y * TileHeight,
-                    TileWidth,
-                    TileHeight
-                );
-
-                if (velocityY > 0) // Moving down
-                {
-                    rect.Y = tileRect.Top - rect.Height;
-                }
-                else if (velocityY < 0) // Moving up
-                {
-                    rect.Y = tileRect.Bottom;
-                }
+                if (velocityY > 0) // Moving down: the topmost tile edge wins
+                    y = System.Math.Min(y, tilePos.Y * TileHeight - rect.Height);
+                else // Moving up: the bottommost tile edge wins
+                    y = System.Math.Max(y, (tilePos.Y + 1) * TileHeight);
             }
+            rect.Y = y;
         }
 
         /// <summary>

@@ -273,11 +273,8 @@ public class Player
         int x = direction > 0 ? Collider.Rect.Right : Collider.Rect.Left - 1;
         // Include the torso so a single 8px tile is reachable by the 12px
         // hitbox, but exclude the lowest 3px to reject foot-only contact.
-        foreach (var tile in map.GetCollisionRects())
-        {
-            for (int y = Collider.Rect.Top + 3; y < Collider.Rect.Bottom - 3; y++)
-                if (tile.Contains(new Point(x, y))) return true;
-        }
+        for (int y = Collider.Rect.Top + 3; y < Collider.Rect.Bottom - 3; y++)
+            if (map.IsSolidAt(x, y)) return true;
         return false;
     }
 

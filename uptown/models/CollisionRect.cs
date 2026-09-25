@@ -12,7 +12,6 @@ namespace NodeTesting.models
     public class CollisionRect : ICollider
     {
         private Rectangle rect;
-        private Texture2D pixel;
         private int offsetX;
         private int offsetY;
         private int width;
@@ -30,8 +29,6 @@ namespace NodeTesting.models
             this.width = width;
             this.height = height;
             rect = new Rectangle(x, y, width, height);
-            pixel = new Texture2D(Globals.graphics.GraphicsDevice, 1, 1);
-            pixel.SetData(new[] { Color.White });
             rect.Offset(-(width / 2), -(height / 2));
         }
 
@@ -115,7 +112,7 @@ namespace NodeTesting.models
         /// <param name="color">The color to draw the collider with.</param>
         public void Draw(Color color)
         {
-            Globals.spriteBatch.Draw(pixel, rect, color);
+            Globals.spriteBatch.Draw(Globals.Pixel, rect, color);
         }
 
         public Vector2 ResolveAgainst(ICollider moving)

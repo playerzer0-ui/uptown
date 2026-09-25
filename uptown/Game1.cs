@@ -4,6 +4,7 @@ using Microsoft.Xna.Framework.Input;
 using NodeTesting.models;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using uptown.Modes;
 
 namespace uptown
@@ -46,8 +47,13 @@ namespace uptown
 
             _canvas = new Canvas(GraphicsDevice, Window, CanvasWidth, CanvasHeight);
             _modes.Add(ModeId.Editor, new EditorMode(SwitchMode, message => Window.Title = message));
-            _modes.Add(ModeId.Home, new HomeMode());
-            SwitchMode(ModeId.Editor);
+            _modes.Add(ModeId.Home, new HomeMode(_canvas.ScreenToCanvas,
+                play: () => SwitchMode(ModeId.Play),
+                create: () => SwitchMode(ModeId.Editor),
+                listLevels: LevelData.ListSaves,
+                load: LoadLevel,
+                exit: Exit));
+            SwitchMode(ModeId.Home);
         }
 
         protected override void Update(GameTime gameTime)
@@ -81,6 +87,21 @@ namespace uptown
             }
 
             base.Draw(gameTime);
+        }
+
+        private void LoadLevel(string path)
+        {
+            try
+            {
+                ((EditorMode)_modes[ModeId.Editor]).LoadLevel(path);
+                SwitchMode(ModeId.Editor);
+                Window.Title = "Loaded: " + path;
+            }
+            catch (Exception error) when (error is IOException || error is UnauthorizedAccessException
+                || error is System.Text.Json.JsonException)
+            {
+                Window.Title = "Load failed: " + error.Message;
+            }
         }
 
         public void SwitchMode(ModeId mode)

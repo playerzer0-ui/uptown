@@ -12,7 +12,6 @@ namespace NodeTesting.models
     {
         private Vector2 center;
         private int radius;
-        private Texture2D pixel;
         private int offsetX;
         private int offsetY;
 
@@ -26,8 +25,6 @@ namespace NodeTesting.models
         {
             this.center = new Vector2(x, y);
             this.radius = radius;
-            pixel = new Texture2D(Globals.graphics.GraphicsDevice, 1, 1);
-            pixel.SetData(new[] { Color.White });
         }
 
         /// <summary>
@@ -148,7 +145,7 @@ namespace NodeTesting.models
             float length = delta.Length();
 
             Globals.spriteBatch.Draw(
-                pixel,
+                Globals.Pixel,
                 start,
                 null,
                 color,

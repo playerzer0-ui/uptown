@@ -66,6 +66,25 @@ public sealed class LevelData
         return Path.Combine(AppContext.BaseDirectory, "Levels");
     }
 
+    public static LevelData Load(string path)
+    {
+        var data = JsonSerializer.Deserialize<LevelData>(File.ReadAllText(path));
+        if (data == null || data.Width <= 0 || data.Height <= 0 || data.Terrain == null
+            || data.Terrain.Length != data.Height || Array.Exists(data.Terrain, row => row == null || row.Length != data.Width))
+            throw new InvalidDataException("Level file is missing or has mismatched terrain.");
+        return data;
+    }
+
+    // Saved levels, newest first.
+    public static string[] ListSaves()
+    {
+        string folder = SaveFolder();
+        if (!Directory.Exists(folder)) return Array.Empty<string>();
+        string[] files = Directory.GetFiles(folder, "*.uptown");
+        Array.Sort(files, (a, b) => File.GetLastWriteTimeUtc(b).CompareTo(File.GetLastWriteTimeUtc(a)));
+        return files;
+    }
+
     public void Save(string path)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path));

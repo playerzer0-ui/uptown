@@ -67,10 +67,11 @@ namespace NodeTesting.models
         /// <param name="position">Position to draw at (center of the frame).</param>
         /// <param name="scale">Scale factor (1.0 = original size).</param>
         /// <param name="color">Color tint to apply.</param>
-        public void DrawFrame(int index, Vector2 position, float scale, Color color)
+        /// <param name="effects">Sprite effects (flip horizontally/vertically).</param>
+        public void DrawFrame(int index, Vector2 position, float scale, Color color, SpriteEffects effects = SpriteEffects.None)
         {
             Globals.spriteBatch.Draw(Texture, position, Rectangles[index], color,
-                0f, Origin, scale, SpriteEffects.None, 0f);
+                0f, Origin, scale, effects, 0f);
         }
 
         /// <summary>

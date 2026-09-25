@@ -10,7 +10,7 @@ namespace uptown.Modes;
 // Layout and navigation first; painting and saving will follow.
 public sealed class EditorMode : GameMode
 {
-    private readonly AutoTileMap preview;
+    private AutoTileMap preview;
     private readonly Action<string> showStatus;
     private Point? spawn;
     private string savePath;
@@ -212,8 +212,21 @@ public sealed class EditorMode : GameMode
         DrawButton(SaveButton, 1, new Color(125, 151, 161));
         DrawButton(PlayButton, 0, new Color(225, 69, 59));
         DrawButton(HomeButton, 2, new Color(149, 213, 112));
-        DrawButton(ToggleButton, sidebarOpen ? 3 : 4, new Color(24, 100, 127));
+        DrawButton(ToggleButton, 4, new Color(24, 100, 127),
+            effects: sidebarOpen ? SpriteEffects.None : SpriteEffects.FlipHorizontally);
         Globals.spriteBatch.End();
+    }
+
+    // Replaces the canvas with a saved level; later saves overwrite that file.
+    public void LoadLevel(string path)
+    {
+        var data = LevelData.Load(path);
+        preview = new AutoTileMap("graphics/tileset/basic", data.CreateGrid(false));
+        spawn = data.HasSpawn ? new Point(data.SpawnX, data.SpawnY) : null;
+        savePath = path;
+        snapshot = Capture();
+        lastPaintCell = null;
+        FitLevel();
     }
 
     public void SaveLevel()
@@ -316,7 +329,8 @@ public sealed class EditorMode : GameMode
         }
     }
 
-    private void DrawButton(CollisionRect button, int iconIndex, Color background, bool enabled = true)
+    private void DrawButton(CollisionRect button, int iconIndex, Color background, bool enabled = true,
+        SpriteEffects effects = SpriteEffects.None)
     {
         Rectangle bounds = button.Rect;
         bool hovered = enabled && button.Contains(pointer);
@@ -325,6 +339,6 @@ public sealed class EditorMode : GameMode
         Fill(inset, hovered ? Color.Lerp(background, Color.White, 0.2f) : background);
         float scale = Math.Min(1f, (float)(bounds.Width - 2) / icons.FrameWidth);
         icons.DrawFrame(iconIndex, button.Center, scale,
-            enabled ? Color.White : new Color(150, 150, 150));
+            enabled ? Color.White : new Color(150, 150, 150), effects);
     }
 }
