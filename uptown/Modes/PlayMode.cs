@@ -1,8 +1,10 @@
 using System;
+using System.Linq;
 using System.IO;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using NodeTesting.models;
+using uptown.SpecialObjects;
 
 namespace uptown.Modes;
 
@@ -11,6 +13,9 @@ public sealed class PlayMode : GameMode
     private readonly AutoTileMap tileMap;
     private readonly Player player;
     private readonly Camera camera;
+    private readonly EntityList entities = new();
+    private readonly SpriteFont font;
+    private bool levelComplete;
     private readonly int viewWidth;
     private readonly int viewHeight;
 
@@ -23,23 +28,70 @@ public sealed class PlayMode : GameMode
             level.CreateGrid(true));
         player = new Player(collisions, new Vector2(level.SpawnX, level.SpawnY));
         camera = new Camera { Origin = new Vector2(viewWidth / 2f, viewHeight / 2f) };
+        font = Globals.Content.Load<SpriteFont>("File");
+        foreach (var item in level.Objects)
+        {
+            var feet = new Vector2(item.X, item.Y);
+            if (item.Type == LevelObject.Checkpoint) entities.Add(new Checkpoint(feet));
+            else if (item.Type == LevelObject.ExitFlag) entities.Add(new ExitFlag(feet));
+        }
         UpdateCamera();
     }
 
     public override void Update(GameTime gameTime)
     {
         tileMap.Update(gameTime);
-        player.Update(gameTime);
+        // Once the level is complete the player freezes; objects keep animating.
+        if (!levelComplete) player.Update(gameTime);
+        entities.Update(gameTime);
+        if (levelComplete) return;
+        TouchSpecialObjects();
+        levelComplete = entities.OfType<ExitFlag>().Any(flag => flag.Reached);
         UpdateCamera();
     }
 
     public override void Draw()
     {
-        Globals.graphics.GraphicsDevice.Clear(Color.CornflowerBlue);
+        Globals.graphics.GraphicsDevice.Clear(PicoPallete.blue);
         Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp, transformMatrix: camera.Transform());
         tileMap.Draw();
+        entities.Draw();
         player.Draw();
         Globals.spriteBatch.End();
+
+        if (levelComplete)
+        {
+            // Screen-space overlay, drawn without the camera transform.
+            Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp);
+            DrawCenteredText("LEVEL", new Vector2(viewWidth / 2f, viewHeight / 2f - 14), 2f);
+            DrawCenteredText("COMPLETE", new Vector2(viewWidth / 2f, viewHeight / 2f + 14), 2f);
+            Globals.spriteBatch.End();
+        }
+    }
+
+    // Fires enter/stay/exit on every special object the player overlaps or leaves.
+    private void TouchSpecialObjects()
+    {
+        Rectangle hitbox = player.Collider.Rect;
+        // Copy first: a hook may remove its object (e.g. a broken block).
+        foreach (var special in entities.OfType<SpecialObject>().ToList())
+        {
+            bool inside = special.Collider != null && special.Collider.Rect.Intersects(hitbox);
+            if (inside && !special.PlayerInside) special.OnPlayerEnter(player);
+            if (inside) special.OnPlayerStay(player);
+            if (!inside && special.PlayerInside) special.OnPlayerExit(player);
+            special.PlayerInside = inside;
+        }
+    }
+
+    // Centered white text with a dark drop shadow.
+    private void DrawCenteredText(string text, Vector2 center, float scale)
+    {
+        Vector2 origin = font.MeasureString(text) / 2;
+        origin = new Vector2(MathF.Round(origin.X), MathF.Round(origin.Y));
+        Globals.spriteBatch.DrawString(font, text, center + new Vector2(1, 1) * scale, PicoPallete.dark_blue,
+            0f, origin, scale, SpriteEffects.None, 0f);
+        Globals.spriteBatch.DrawString(font, text, center, Color.White, 0f, origin, scale, SpriteEffects.None, 0f);
     }
 
     private void UpdateCamera()

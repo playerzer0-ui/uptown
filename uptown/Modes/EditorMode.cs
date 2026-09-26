@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -15,9 +16,19 @@ public sealed class EditorMode : GameMode
     private Point? spawn;
     private string savePath;
     private LevelData snapshot;
-    public LevelData Capture() => LevelData.Capture(preview, spawn);
+    public LevelData Capture() => LevelData.Capture(preview, spawn, objects);
+    private enum Tool { None, Terrain, Spawn, Checkpoint, Exit }
     private readonly CollisionRect TerrainButton;
-    private bool terrainSelected;
+    private readonly CollisionRect SpawnButton;
+    private readonly CollisionRect CheckpointButton;
+    private readonly CollisionRect ExitButton;
+    private Tool tool;
+    private readonly List<LevelObject> objects = new();
+    // While dragging the spawn or an object: where it would drop, and whether that spot is allowed.
+    private Point? ghost;
+    private bool ghostValid;
+    // The checkpoint picked up by the current drag, or null when the drag places a new one.
+    private LevelObject moving;
     private Point? lastPaintCell;
     private bool lastErase;
     private int viewWidth;
@@ -32,6 +43,9 @@ public sealed class EditorMode : GameMode
     private readonly Action<ModeId> switchMode;
     private readonly SpriteSheet icons;
     private readonly Texture2D tileset;
+    private readonly Texture2D playerSprite;
+    private readonly Texture2D checkpointSprite;
+    private readonly Texture2D exitSprite;
     private readonly Texture2D pixel;
     private readonly Camera camera;
     private bool isPanning;
@@ -58,7 +72,13 @@ public sealed class EditorMode : GameMode
         HomeButton = new CollisionRect(viewWidth - 20, 16, ButtonSize, ButtonSize);
         ToggleButton = new CollisionRect(SidebarWidth + 6, viewHeight / 2, 12, 24);
         TerrainButton = new CollisionRect(24, 24, 32, 32);
+        SpawnButton = new CollisionRect(56, 24, 32, 32);
+        CheckpointButton = new CollisionRect(24, 60, 32, 32);
+        ExitButton = new CollisionRect(56, 60, 32, 32);
         tileset = Globals.Content.Load<Texture2D>("graphics/tileset/basic");
+        playerSprite = Globals.Content.Load<Texture2D>("graphics/player/idle");
+        checkpointSprite = Globals.Content.Load<Texture2D>("graphics/special_objects/checkpoint");
+        exitSprite = Globals.Content.Load<Texture2D>("graphics/special_objects/exit_flag");
         pixel = new Texture2D(Globals.graphics.GraphicsDevice, 1, 1);
         pixel.SetData(new[] { Color.White });
         var blank = new int[80, 400];
@@ -77,9 +97,14 @@ public sealed class EditorMode : GameMode
         isPanning = false;
         lastPaintCell = null;
         wheelRemainder = 0;
+        CancelDrag();
     }
 
-    public override void Leave() => isPanning = false;
+    public override void Leave()
+    {
+        isPanning = false;
+        CancelDrag();
+    }
 
     public override void Update(GameTime gameTime)
     {
@@ -94,6 +119,7 @@ public sealed class EditorMode : GameMode
         Vector2 position = new Vector2(mouse.X, mouse.Y);
         pointer = new Point((int)MathF.Floor(position.X / uiScale), (int)MathF.Floor(position.Y / uiScale));
         bool clicked = mouse.LeftButton == ButtonState.Pressed && previousMouse.LeftButton == ButtonState.Released;
+        bool rightClicked = mouse.RightButton == ButtonState.Pressed && previousMouse.RightButton == ButtonState.Released;
         bool overLevel = new Rectangle(sidebarOpen ? SidebarWidth : 0, 0,
             viewWidth - (sidebarOpen ? SidebarWidth : 0), viewHeight).Contains(pointer)
             && !ToggleButton.Contains(pointer) && !SaveButton.Contains(pointer)
@@ -125,25 +151,52 @@ public sealed class EditorMode : GameMode
             }
         }
         previousMouse = mouse;
-        if (isPanning) { lastPaintCell = null; return; }
+        if (isPanning) { lastPaintCell = null; CancelDrag(); return; }
         if (overLevel && Globals.Input.KeyDown(Keys.P))
         {
             lastPaintCell = null;
-            if (clicked)
-            {
-                var world = Vector2.Transform(position, Matrix.Invert(WorldTransform()));
-                var proposed = new Point((int)MathF.Floor(world.X / 8) * 8 + 4,
-                    ((int)MathF.Floor(world.Y / 8) + 1) * 8);
-                if (LevelData.Capture(preview, proposed).ValidSpawn())
-                {
-                    spawn = proposed;
-                    snapshot = Capture();
-                }
-                else showStatus("Spawn needs 8x12 pixels of clear space inside the level.");
-            }
+            if (clicked) TrySetSpawn(SpawnCellAt(position));
             return;
         }
-        if (terrainSelected && overLevel && scroll == 0
+        // Spawn, checkpoint and exit tools: press on the level, drag the ghost around, release to drop it.
+        if (tool is Tool.Spawn or Tool.Checkpoint or Tool.Exit)
+        {
+            bool held = mouse.LeftButton == ButtonState.Pressed;
+            if (held && (ghost.HasValue || (clicked && overLevel)))
+            {
+                // Pressing on an existing checkpoint picks it up instead of making a new one.
+                if (!ghost.HasValue && tool == Tool.Checkpoint)
+                    moving = ObjectUnder(position, LevelObject.Checkpoint);
+                var cell = SpawnCellAt(position);
+                if (cell != ghost)
+                {
+                    ghost = cell;
+                    ghostValid = tool == Tool.Spawn
+                        ? LevelData.Capture(preview, cell).ValidSpawn()
+                        : ObjectFits(cell, tool == Tool.Checkpoint ? LevelObject.Checkpoint : LevelObject.ExitFlag, moving);
+                }
+                return;
+            }
+            if (ghost.HasValue)
+            {
+                // Dropping outside the level (e.g. on the sidebar) cancels the move.
+                if (overLevel) Drop(ghost.Value);
+                CancelDrag();
+                return;
+            }
+            // Right-click deletes the checkpoint or exit flag under the cursor.
+            if (rightClicked && overLevel && tool != Tool.Spawn)
+            {
+                var target = ObjectUnder(position, tool == Tool.Checkpoint ? LevelObject.Checkpoint : LevelObject.ExitFlag);
+                if (target != null)
+                {
+                    objects.Remove(target);
+                    snapshot = Capture();
+                }
+                return;
+            }
+        }
+        if (tool == Tool.Terrain && overLevel && scroll == 0
             && (mouse.LeftButton == ButtonState.Pressed || mouse.RightButton == ButtonState.Pressed))
         {
             Vector2 world = Vector2.Transform(position, Matrix.Invert(WorldTransform()));
@@ -159,7 +212,10 @@ public sealed class EditorMode : GameMode
         }
         else lastPaintCell = null;
         if (!clicked) return;
-        if (sidebarOpen && TerrainButton.Contains(pointer)) terrainSelected = true;
+        if (sidebarOpen && TerrainButton.Contains(pointer)) tool = Tool.Terrain;
+        else if (sidebarOpen && SpawnButton.Contains(pointer)) tool = Tool.Spawn;
+        else if (sidebarOpen && CheckpointButton.Contains(pointer)) tool = Tool.Checkpoint;
+        else if (sidebarOpen && ExitButton.Contains(pointer)) tool = Tool.Exit;
         else if (ToggleButton.Contains(pointer))
         {
             Vector2 center = camera.Position + ViewCenter() / camera.Zoom;
@@ -180,9 +236,20 @@ public sealed class EditorMode : GameMode
         Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp, transformMatrix: WorldTransform());
         preview.Draw();
 
+        foreach (var item in objects)
+        {
+            // The picked-up checkpoint, or the exit being moved, fades while its ghost is dragged.
+            bool dragged = ghost.HasValue && (item == moving || (tool == Tool.Exit && item.Type == LevelObject.ExitFlag));
+            DrawObject(item.Type, new Point(item.X, item.Y), ObjectFits(new Point(item.X, item.Y), item.Type, item),
+                dragged ? 0.35f : 1f);
+        }
         if (snapshot.HasSpawn)
-            Fill(new Rectangle(snapshot.SpawnX - 4, snapshot.SpawnY - 12, 8, 12),
-                snapshot.ValidSpawn() ? Color.Yellow * 0.7f : Color.Red * 0.7f);
+            DrawPlayer(new Point(snapshot.SpawnX, snapshot.SpawnY), snapshot.ValidSpawn(),
+                ghost.HasValue && tool == Tool.Spawn ? 0.35f : 1f);
+        if (ghost.HasValue && tool == Tool.Spawn)
+            DrawPlayer(ghost.Value, ghostValid, 0.75f);
+        else if (ghost.HasValue)
+            DrawObject(tool == Tool.Checkpoint ? LevelObject.Checkpoint : LevelObject.ExitFlag, ghost.Value, ghostValid, 0.75f);
         Globals.spriteBatch.End();
 
         // Draw the level outline in screen pixels so zoom cannot make it disappear.
@@ -205,9 +272,14 @@ public sealed class EditorMode : GameMode
         {
             Fill(new Rectangle(0, 0, SidebarWidth, viewHeight), new Color(123, 211, 235));
             Fill(new Rectangle(SidebarWidth - 1, 0, 1, viewHeight), new Color(24, 82, 104));
-            TerrainButton.Draw(terrainSelected ? Color.Yellow : TerrainButton.Contains(pointer) ? Color.White : new Color(24, 82, 104));
-            Fill(new Rectangle(9, 9, 30, 30), new Color(24, 100, 127));
+            DrawToolButton(TerrainButton, Tool.Terrain);
             Globals.spriteBatch.Draw(tileset, new Rectangle(12, 12, 24, 24), new Rectangle(8, 0, 8, 8), Color.White);
+            DrawToolButton(SpawnButton, Tool.Spawn);
+            Globals.spriteBatch.Draw(playerSprite, new Rectangle(44, 12, 24, 24), new Rectangle(0, 0, 16, 16), Color.White);
+            DrawToolButton(CheckpointButton, Tool.Checkpoint);
+            Globals.spriteBatch.Draw(checkpointSprite, new Rectangle(18, 48, 12, 24), new Rectangle(0, 0, 16, 32), Color.White);
+            DrawToolButton(ExitButton, Tool.Exit);
+            Globals.spriteBatch.Draw(exitSprite, new Rectangle(50, 48, 12, 24), new Rectangle(0, 0, 16, 32), Color.White);
         }
         DrawButton(SaveButton, 1, new Color(125, 151, 161));
         DrawButton(PlayButton, 0, new Color(225, 69, 59));
@@ -223,6 +295,9 @@ public sealed class EditorMode : GameMode
         var data = LevelData.Load(path);
         preview = new AutoTileMap("graphics/tileset/basic", data.CreateGrid(false));
         spawn = data.HasSpawn ? new Point(data.SpawnX, data.SpawnY) : null;
+        objects.Clear();
+        objects.AddRange(data.Objects);
+        CancelDrag();
         savePath = path;
         snapshot = Capture();
         lastPaintCell = null;
@@ -244,6 +319,104 @@ public sealed class EditorMode : GameMode
         {
             showStatus("Save failed: " + error.Message);
         }
+    }
+
+    // Spawn points are the player's feet: centered on a tile, on that tile's bottom edge.
+    private Point SpawnCellAt(Vector2 screen)
+    {
+        var world = Vector2.Transform(screen, Matrix.Invert(WorldTransform()));
+        return new Point((int)MathF.Floor(world.X / 8) * 8 + 4, ((int)MathF.Floor(world.Y / 8) + 1) * 8);
+    }
+
+    private void TrySetSpawn(Point proposed)
+    {
+        if (LevelData.Capture(preview, proposed).ValidSpawn())
+        {
+            spawn = proposed;
+            snapshot = Capture();
+        }
+        else showStatus("Spawn needs 8x12 pixels of clear space inside the level.");
+    }
+
+    private void CancelDrag()
+    {
+        ghost = null;
+        moving = null;
+    }
+
+    private void Drop(Point feet)
+    {
+        if (tool == Tool.Spawn) { TrySetSpawn(feet); return; }
+        if (!ghostValid)
+        {
+            showStatus("Objects need 8x16 pixels of clear space inside the level, and can't share a spot.");
+            return;
+        }
+        if (tool == Tool.Exit)
+        {
+            // Only one exit: placing it again moves the existing one.
+            objects.RemoveAll(item => item.Type == LevelObject.ExitFlag);
+            objects.Add(new LevelObject { Type = LevelObject.ExitFlag, X = feet.X, Y = feet.Y });
+        }
+        else if (moving != null)
+        {
+            moving.X = feet.X;
+            moving.Y = feet.Y;
+        }
+        else objects.Add(new LevelObject { Type = LevelObject.Checkpoint, X = feet.X, Y = feet.Y });
+        snapshot = Capture();
+    }
+
+    // Topmost object of the given type whose 16x32 sprite is under the screen position.
+    private LevelObject ObjectUnder(Vector2 screen, string type)
+    {
+        var world = Vector2.Transform(screen, Matrix.Invert(WorldTransform()));
+        for (int i = objects.Count - 1; i >= 0; i--)
+        {
+            var item = objects[i];
+            if (item.Type == type && new Rectangle(item.X - 8, item.Y - 32, 16, 32).Contains(world)) return item;
+        }
+        return null;
+    }
+
+    // An object needs its 8x16 hitbox clear of terrain and inside the level, and can't sit on
+    // another object's spot. The exit ignores the old exit, since dropping it moves that one.
+    private bool ObjectFits(Point feet, string type, LevelObject ignore)
+    {
+        if (feet.X - 4 < 0 || feet.X + 4 > preview.Width * 8 || feet.Y - 16 < 0 || feet.Y > preview.Height * 8) return false;
+        for (int y = (feet.Y - 16) / 8; y <= (feet.Y - 1) / 8; y++)
+            for (int x = (feet.X - 4) / 8; x <= (feet.X + 3) / 8; x++)
+                if (preview.Occupied(x, y)) return false;
+        foreach (var item in objects)
+        {
+            if (item == ignore || (type == LevelObject.ExitFlag && item.Type == LevelObject.ExitFlag)) continue;
+            if (item.X == feet.X && item.Y == feet.Y) return false;
+        }
+        return true;
+    }
+
+    // First frame of the object's sprite at its feet; blocked spots are tinted red.
+    private void DrawObject(string type, Point feet, bool valid, float alpha)
+    {
+        if (!valid) Fill(new Rectangle(feet.X - 4, feet.Y - 16, 8, 16), Color.Red * 0.5f * alpha);
+        Texture2D texture = type == LevelObject.ExitFlag ? exitSprite : checkpointSprite;
+        Globals.spriteBatch.Draw(texture, new Vector2(feet.X - 8, feet.Y - 32), new Rectangle(0, 0, 16, 32),
+            (valid ? Color.White : new Color(255, 120, 120)) * alpha);
+    }
+
+    // Idle frame drawn at the feet position; invalid spots are tinted red.
+    private void DrawPlayer(Point feet, bool valid, float alpha)
+    {
+        if (!valid) Fill(new Rectangle(feet.X - 4, feet.Y - 12, 8, 12), Color.Red * 0.5f * alpha);
+        Globals.spriteBatch.Draw(playerSprite, new Vector2(feet.X - 8, feet.Y - 16), new Rectangle(0, 0, 16, 16),
+            (valid ? Color.White : new Color(255, 120, 120)) * alpha);
+    }
+
+    private void DrawToolButton(CollisionRect button, Tool buttonTool)
+    {
+        button.Draw(tool == buttonTool ? Color.Yellow : button.Contains(pointer) ? Color.White : new Color(24, 82, 104));
+        Rectangle bounds = button.Rect;
+        Fill(new Rectangle(bounds.X + 1, bounds.Y + 1, bounds.Width - 2, bounds.Height - 2), new Color(24, 100, 127));
     }
 
     private void Fill(Rectangle rectangle, Color color) => Globals.spriteBatch.Draw(pixel, rectangle, color);

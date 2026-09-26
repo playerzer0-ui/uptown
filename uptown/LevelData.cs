@@ -1,10 +1,22 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using Microsoft.Xna.Framework;
 using NodeTesting.models;
 
 namespace uptown;
+
+// A special object placed in the editor. X/Y are its feet (bottom-center), like the spawn.
+public sealed class LevelObject
+{
+    public const string Checkpoint = "checkpoint";
+    public const string ExitFlag = "exit";
+
+    public string Type { get; set; }
+    public int X { get; set; }
+    public int Y { get; set; }
+}
 
 public sealed class LevelData
 {
@@ -18,10 +30,14 @@ public sealed class LevelData
     public int SpawnY { get; set; }
     public bool HasSpawn { get; set; }
     public int[][] Terrain { get; set; }
+    // Older level files have no objects; the empty default keeps them loading.
+    public List<LevelObject> Objects { get; set; } = new();
 
-    public static LevelData Capture(AutoTileMap map, Point? spawn)
+    public static LevelData Capture(AutoTileMap map, Point? spawn, IEnumerable<LevelObject> objects = null)
     {
         var data = new LevelData { Width = map.Width, Height = map.Height };
+        if (objects != null)
+            foreach (var item in objects) data.Objects.Add(new LevelObject { Type = item.Type, X = item.X, Y = item.Y });
         data.Terrain = new int[data.Height][];
         for (int y = 0; y < data.Height; y++)
         {
@@ -72,6 +88,8 @@ public sealed class LevelData
         if (data == null || data.Width <= 0 || data.Height <= 0 || data.Terrain == null
             || data.Terrain.Length != data.Height || Array.Exists(data.Terrain, row => row == null || row.Length != data.Width))
             throw new InvalidDataException("Level file is missing or has mismatched terrain.");
+        data.Objects ??= new();
+        data.Objects.RemoveAll(item => item == null);
         return data;
     }
 

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
@@ -18,7 +18,8 @@ public class Player
     private const float WallSlideSpeed = 30f;
     private const float WallJumpSpeed = 110f;
     private readonly CollisionMap map;
-    private readonly Vector2 spawn;
+    // Where the player reappears after dying; checkpoints move it.
+    public Vector2 Spawn { get; set; }
     private readonly SpriteAnimation idle = new("graphics/player/idle", 2, 4);
     private readonly SpriteAnimation walk = new("graphics/player/walk", 8, 12);
     private readonly SpriteAnimation push = new("graphics/player/push", 2, 6);
@@ -51,7 +52,7 @@ public class Player
     public Player(CollisionMap map, Vector2 spawn)
     {
         this.map = map;
-        this.spawn = spawn;
+        Spawn = spawn;
         Position = spawn;
         Collider = new CollisionRect((int)spawn.X, (int)spawn.Y - 6, 8, 12);
         animation = idle;
@@ -302,7 +303,7 @@ public class Player
 
     private void Respawn()
     {
-        Position = spawn;
+        Position = Spawn;
         SetCrouching(false);
         velocity = remainder = Vector2.Zero;
         coyoteTime = wallJumpTime = 0;
