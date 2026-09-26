@@ -17,8 +17,18 @@ public abstract class SpecialObject : Entity
     protected SpecialObject(Vector2 feet, int width, int height) : base(feet)
     {
         // CollisionRect takes a center, so lift it by half the height.
-        Collider = new CollisionRect((int)feet.X, (int)feet.Y - height / 2, width, height);
+        if (width > 0 && height > 0)
+            Collider = new CollisionRect((int)feet.X, (int)feet.Y - height / 2, width, height);
     }
+
+    /// <summary>
+    /// Is the player touching this object right now? PlayMode asks every frame and fires the
+    /// hooks below from the answer. By default the two CollisionRects must overlap; override it
+    /// for another rule (distance, same tile, near + key press). Objects that override it can
+    /// pass 0 for width or height to skip the collider.
+    /// </summary>
+    public virtual bool Touches(Player player) =>
+        Collider != null && Collider.Intersects(player.Collider);
 
     /// <summary>The first frame the player touches this object.</summary>
     public virtual void OnPlayerEnter(Player player) { }

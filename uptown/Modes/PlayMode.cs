@@ -72,11 +72,10 @@ public sealed class PlayMode : GameMode
     // Fires enter/stay/exit on every special object the player overlaps or leaves.
     private void TouchSpecialObjects()
     {
-        Rectangle hitbox = player.Collider.Rect;
         // Copy first: a hook may remove its object (e.g. a broken block).
         foreach (var special in entities.OfType<SpecialObject>().ToList())
         {
-            bool inside = special.Collider != null && special.Collider.Rect.Intersects(hitbox);
+            bool inside = special.Touches(player);
             if (inside && !special.PlayerInside) special.OnPlayerEnter(player);
             if (inside) special.OnPlayerStay(player);
             if (!inside && special.PlayerInside) special.OnPlayerExit(player);
