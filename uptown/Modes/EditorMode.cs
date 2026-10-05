@@ -17,7 +17,7 @@ public sealed class EditorMode : GameMode
     private string savePath;
     private LevelData snapshot;
     public LevelData Capture() => LevelData.Capture(preview, spawn, objects);
-    private enum Tool { None, Terrain, Spawn, Checkpoint, Exit }
+    private enum Tool { None, Terrain, Spawn, Checkpoint, Exit, BounceBall, Spring }
     private enum Palette { Terrain, Special, Sprites, Background }
     private Palette palette;
     private readonly Texture2D[] bars;
@@ -26,6 +26,10 @@ public sealed class EditorMode : GameMode
     private readonly CollisionRect SpawnButton;
     private readonly CollisionRect CheckpointButton;
     private readonly CollisionRect ExitButton;
+    private readonly CollisionRect BounceBallButton = new(16, 52, 27, 27);
+    private readonly CollisionRect SpringButton = new(48, 52, 27, 27);
+    private BounceDirection bounceDirection;
+    private BounceDirection ghostDirection;
     private Tool tool;
     private readonly List<LevelObject> objects = new();
     // While dragging the spawn or an object: where it would drop, and whether that spot is allowed.
@@ -50,6 +54,8 @@ public sealed class EditorMode : GameMode
     private readonly Texture2D playerSprite;
     private readonly Texture2D checkpointSprite;
     private readonly Texture2D exitSprite;
+    private readonly Texture2D bounceBallSprite;
+    private readonly Texture2D springSprite;
     private readonly Texture2D pixel;
     private readonly Camera camera;
     private bool isPanning;
@@ -90,6 +96,8 @@ public sealed class EditorMode : GameMode
         playerSprite = Globals.Content.Load<Texture2D>("graphics/player/idle");
         checkpointSprite = Globals.Content.Load<Texture2D>("graphics/special_objects/checkpoint");
         exitSprite = Globals.Content.Load<Texture2D>("graphics/special_objects/exit_flag");
+        bounceBallSprite = Globals.Content.Load<Texture2D>("graphics/special_objects/bounceball");
+        springSprite = Globals.Content.Load<Texture2D>("graphics/special_objects/spring");
         pixel = new Texture2D(Globals.graphics.GraphicsDevice, 1, 1);
         pixel.SetData(new[] { Color.White });
         var blank = new int[80, 400];
@@ -125,6 +133,12 @@ public sealed class EditorMode : GameMode
         if (control && Globals.Input.KeyJustDown(Keys.Right)) ExpandLevel(40, 0);
         if (control && Globals.Input.KeyJustDown(Keys.Down)) ExpandLevel(0, 20);
         if (Globals.Input.KeyJustDown(Keys.F)) FitLevel();
+        if (tool == Tool.BounceBall && Globals.Input.KeyJustDown(Keys.R))
+        {
+            bounceDirection = (BounceDirection)(((int)bounceDirection + 1) % 4);
+            ghostDirection = bounceDirection;
+            showStatus($"Bounceball: {bounceDirection} | R: rotate");
+        }
         RefreshLayout();
         MouseState mouse = Mouse.GetState();
         Vector2 position = new Vector2(mouse.X, mouse.Y);
@@ -179,6 +193,7 @@ public sealed class EditorMode : GameMode
                 {
                     tool = selected;
                     draggingFromPalette = tool != Tool.Terrain;
+                    if (tool == Tool.BounceBall) showStatus($"Bounceball: {bounceDirection} | R: rotate");
                 }
             }
             return;
@@ -190,22 +205,26 @@ public sealed class EditorMode : GameMode
             return;
         }
         // Spawn, checkpoint and exit tools: press on the level, drag the ghost around, release to drop it.
-        if (tool is Tool.Spawn or Tool.Checkpoint or Tool.Exit)
+        if (tool is Tool.Spawn or Tool.Checkpoint or Tool.Exit or Tool.BounceBall or Tool.Spring)
         {
             bool held = mouse.LeftButton == ButtonState.Pressed;
             if (held && (ghost.HasValue || ((clicked || draggingFromPalette) && overLevel)))
             {
-                // Pressing on an existing checkpoint picks it up instead of making a new one.
-                if (!ghost.HasValue && !draggingFromPalette && tool == Tool.Checkpoint)
-                    moving = ObjectUnder(position, LevelObject.Checkpoint);
-                var cell = SpawnCellAt(position);
-                if (cell != ghost)
+                if (!ghost.HasValue && !draggingFromPalette && tool != Tool.Spawn)
                 {
-                    ghost = cell;
-                    ghostValid = tool == Tool.Spawn
-                        ? LevelData.Capture(preview, cell).ValidSpawn()
-                        : ObjectFits(cell, tool == Tool.Checkpoint ? LevelObject.Checkpoint : LevelObject.ExitFlag, moving);
+                    moving = ObjectUnder(position, SelectedObjectType());
+                    if (moving != null && tool == Tool.BounceBall) bounceDirection = moving.Direction;
                 }
+                var cell = SpawnCellAt(position);
+                // Special sprites are 16px wide: center on a tile boundary so their
+                // left/right edges align with the 8px grid instead of spanning three columns.
+                if (tool != Tool.Spawn) cell.X += 4;
+                ghost = cell;
+                ghostDirection = bounceDirection;
+                if (tool == Tool.Spring) TrySpringDirection(cell, out ghostDirection);
+                ghostValid = tool == Tool.Spawn
+                    ? LevelData.Capture(preview, cell).ValidSpawn()
+                    : ObjectFits(cell, SelectedObjectType(), moving, ghostDirection);
                 return;
             }
             if (ghost.HasValue)
@@ -219,7 +238,7 @@ public sealed class EditorMode : GameMode
             // Right-click deletes the checkpoint or exit flag under the cursor.
             if (rightClicked && overLevel && tool != Tool.Spawn)
             {
-                var target = ObjectUnder(position, tool == Tool.Checkpoint ? LevelObject.Checkpoint : LevelObject.ExitFlag);
+                var target = ObjectUnder(position, SelectedObjectType());
                 if (target != null)
                 {
                     objects.Remove(target);
@@ -263,13 +282,20 @@ public sealed class EditorMode : GameMode
         Globals.graphics.GraphicsDevice.Clear(new Color(0, 174, 220));
         Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp, transformMatrix: WorldTransform());
         preview.Draw();
+        Globals.spriteBatch.End();
+
+        // Screen-space lines stay one pixel wide regardless of editor zoom.
+        Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp);
+        DrawGrid();
+        Globals.spriteBatch.End();
+        Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp, transformMatrix: WorldTransform());
 
         foreach (var item in objects)
         {
             // The picked-up checkpoint, or the exit being moved, fades while its ghost is dragged.
             bool dragged = ghost.HasValue && (item == moving || (tool == Tool.Exit && item.Type == LevelObject.ExitFlag));
-            DrawObject(item.Type, new Point(item.X, item.Y), ObjectFits(new Point(item.X, item.Y), item.Type, item),
-                dragged ? 0.35f : 1f);
+            DrawObject(item.Type, new Point(item.X, item.Y), ObjectFits(new Point(item.X, item.Y), item.Type, item, item.Direction),
+                dragged ? 0.35f : 1f, item.Direction);
         }
         if (snapshot.HasSpawn)
             DrawPlayer(new Point(snapshot.SpawnX, snapshot.SpawnY), snapshot.ValidSpawn(),
@@ -277,7 +303,7 @@ public sealed class EditorMode : GameMode
         if (ghost.HasValue && tool == Tool.Spawn)
             DrawPlayer(ghost.Value, ghostValid, 0.75f);
         else if (ghost.HasValue)
-            DrawObject(tool == Tool.Checkpoint ? LevelObject.Checkpoint : LevelObject.ExitFlag, ghost.Value, ghostValid, 0.75f);
+            DrawObject(SelectedObjectType(), ghost.Value, ghostValid, 0.75f, ghostDirection);
         Globals.spriteBatch.End();
 
         // Draw the level outline in screen pixels so zoom cannot make it disappear.
@@ -369,7 +395,9 @@ public sealed class EditorMode : GameMode
         if (tool == Tool.Spawn) { TrySetSpawn(feet); return; }
         if (!ghostValid)
         {
-            showStatus("Objects need 8x16 pixels of clear space inside the level, and can't share a spot.");
+            showStatus(tool == Tool.Spring
+                ? "Spring needs clear space and a solid floor or wall across its base."
+                : "Object needs clear space inside the level and can't share a spot.");
             return;
         }
         if (tool == Tool.Exit)
@@ -382,31 +410,101 @@ public sealed class EditorMode : GameMode
         {
             moving.X = feet.X;
             moving.Y = feet.Y;
+            moving.Direction = ghostDirection;
         }
-        else objects.Add(new LevelObject { Type = LevelObject.Checkpoint, X = feet.X, Y = feet.Y });
+        else objects.Add(new LevelObject { Type = SelectedObjectType(), X = feet.X, Y = feet.Y, Direction = ghostDirection });
         snapshot = Capture();
     }
 
-    // Topmost object of the given type whose 16x32 sprite is under the screen position.
+    private string SelectedObjectType() => tool switch
+    {
+        Tool.BounceBall => LevelObject.BounceBall,
+        Tool.Spring => LevelObject.Spring,
+        Tool.Exit => LevelObject.ExitFlag,
+        _ => LevelObject.Checkpoint
+    };
+
+    private static bool IsLauncher(string type) =>
+        type == LevelObject.BounceBall || type == LevelObject.Spring;
+
+    private Texture2D ObjectTexture(string type) => type switch
+    {
+        LevelObject.BounceBall => bounceBallSprite,
+        LevelObject.Spring => springSprite,
+        LevelObject.ExitFlag => exitSprite,
+        _ => checkpointSprite
+    };
+
+    private bool SpringSupported(Point feet, BounceDirection direction)
+    {
+        int left = (feet.X - 8) / 8, right = (feet.X + 7) / 8;
+        int top = (feet.Y - 16) / 8, bottom = (feet.Y - 1) / 8;
+        if (direction == BounceDirection.Up)
+        {
+            for (int x = left; x <= right; x++)
+                if (!preview.Occupied(x, feet.Y / 8)) return false;
+            return true;
+        }
+        if (direction is BounceDirection.Right or BounceDirection.Left)
+        {
+            int wall = direction == BounceDirection.Right ? left - 1 : right + 1;
+            for (int y = top; y <= bottom; y++)
+                if (!preview.Occupied(wall, y)) return false;
+            return true;
+        }
+        return false;
+    }
+
+    private bool TrySpringDirection(Point feet, out BounceDirection direction)
+    {
+        // Prefer a floor mount at a corner, then a left or right wall.
+        foreach (var candidate in new[] { BounceDirection.Up, BounceDirection.Right, BounceDirection.Left })
+            if (SpringSupported(feet, candidate)) { direction = candidate; return true; }
+        direction = BounceDirection.Up;
+        return false;
+    }
+
+    private void DrawDirection(Point feet, BounceDirection direction, float alpha)
+    {
+        Point axis = direction switch
+        {
+            BounceDirection.Right => new Point(1, 0),
+            BounceDirection.Down => new Point(0, 1),
+            BounceDirection.Left => new Point(-1, 0),
+            _ => new Point(0, -1)
+        };
+        var center = new Point(feet.X, feet.Y - 8);
+        Color color = PicoPallete.dark_blue * alpha;
+        for (int i = -2; i <= 2; i++)
+            Fill(new Rectangle(center.X + axis.X * i, center.Y + axis.Y * i, 1, 1), color);
+        for (int side = -1; side <= 1; side += 2)
+            Fill(new Rectangle(center.X + axis.X - axis.Y * side,
+                center.Y + axis.Y + axis.X * side, 1, 1), color);
+    }
+
+    // Hit testing uses the actual sprite size for each object.
     private LevelObject ObjectUnder(Vector2 screen, string type)
     {
         var world = Vector2.Transform(screen, Matrix.Invert(WorldTransform()));
         for (int i = objects.Count - 1; i >= 0; i--)
         {
             var item = objects[i];
-            if (item.Type == type && new Rectangle(item.X - 8, item.Y - 32, 16, 32).Contains(world)) return item;
+            int height = IsLauncher(item.Type) ? 16 : 32;
+            if (item.Type == type && new Rectangle(item.X - 8, item.Y - height, 16, height).Contains(world)) return item;
         }
         return null;
     }
 
     // An object needs its 8x16 hitbox clear of terrain and inside the level, and can't sit on
     // another object's spot. The exit ignores the old exit, since dropping it moves that one.
-    private bool ObjectFits(Point feet, string type, LevelObject ignore)
+    private bool ObjectFits(Point feet, string type, LevelObject ignore, BounceDirection direction = BounceDirection.Up)
     {
-        if (feet.X - 4 < 0 || feet.X + 4 > preview.Width * 8 || feet.Y - 16 < 0 || feet.Y > preview.Height * 8) return false;
+        int halfWidth = IsLauncher(type) ? 8 : 4;
+        if (feet.X - halfWidth < 0 || feet.X + halfWidth > preview.Width * 8 || feet.Y - 16 < 0 || feet.Y > preview.Height * 8) return false;
         for (int y = (feet.Y - 16) / 8; y <= (feet.Y - 1) / 8; y++)
-            for (int x = (feet.X - 4) / 8; x <= (feet.X + 3) / 8; x++)
+            for (int x = (feet.X - halfWidth) / 8; x <= (feet.X + halfWidth - 1) / 8; x++)
                 if (preview.Occupied(x, y)) return false;
+        if (type == LevelObject.Spring && !SpringSupported(feet, direction)) return false;
         foreach (var item in objects)
         {
             if (item == ignore || (type == LevelObject.ExitFlag && item.Type == LevelObject.ExitFlag)) continue;
@@ -416,10 +514,20 @@ public sealed class EditorMode : GameMode
     }
 
     // First frame of the object's sprite at its feet; blocked spots are tinted red.
-    private void DrawObject(string type, Point feet, bool valid, float alpha)
+    private void DrawObject(string type, Point feet, bool valid, float alpha, BounceDirection direction = BounceDirection.Up)
     {
-        if (!valid) Fill(new Rectangle(feet.X - 4, feet.Y - 16, 8, 16), Color.Red * 0.5f * alpha);
-        Texture2D texture = type == LevelObject.ExitFlag ? exitSprite : checkpointSprite;
+        int halfWidth = IsLauncher(type) ? 8 : 4;
+        if (!valid) Fill(new Rectangle(feet.X - halfWidth, feet.Y - 16, halfWidth * 2, 16), Color.Red * 0.5f * alpha);
+        Texture2D texture = ObjectTexture(type);
+        if (IsLauncher(type))
+        {
+            Globals.spriteBatch.Draw(texture, new Vector2(feet.X, feet.Y - 8),
+                new Rectangle(0, 0, 16, 16),
+                (valid ? Color.White : new Color(255, 120, 120)) * alpha,
+                (int)direction * MathHelper.PiOver2, new Vector2(8, 8), 1f, SpriteEffects.None, 0);
+            if (type == LevelObject.BounceBall) DrawDirection(feet, direction, alpha);
+            return;
+        }
         Globals.spriteBatch.Draw(texture, new Vector2(feet.X - 8, feet.Y - 32), new Rectangle(0, 0, 16, 32),
             (valid ? Color.White : new Color(255, 120, 120)) * alpha);
     }
@@ -438,12 +546,17 @@ public sealed class EditorMode : GameMode
         if (palette == Palette.Sprites && SpawnButton.Contains(point)) return Tool.Spawn;
         if (palette == Palette.Special && CheckpointButton.Contains(point)) return Tool.Checkpoint;
         if (palette == Palette.Special && ExitButton.Contains(point)) return Tool.Exit;
+        if (palette == Palette.Special && BounceBallButton.Contains(point)) return Tool.BounceBall;
+        if (palette == Palette.Special && SpringButton.Contains(point)) return Tool.Spring;
         return Tool.None;
     }
 
     private void DrawPalette()
     {
-        // Draw only the supplied artwork, without filling beyond its bounds.
+        // Extend only the panel body using the artwork's bottom row; tabs keep their native size.
+        if (viewHeight > 180)
+            Globals.spriteBatch.Draw(bars[(int)palette], new Rectangle(0, 180, 64, viewHeight - 180),
+                new Rectangle(0, 179, 64, 1), Color.White);
         Globals.spriteBatch.Draw(bars[(int)palette], new Rectangle(0, 0, 64, 180),
             new Rectangle(0, 0, 64, 180), Color.White);
         for (int i = 0; i < bars.Length; i++)
@@ -471,6 +584,8 @@ public sealed class EditorMode : GameMode
         {
             DrawPaletteItem(checkpointSprite, new Rectangle(0, 0, 16, 32), CheckpointButton.Rect);
             DrawPaletteItem(exitSprite, new Rectangle(0, 0, 16, 32), ExitButton.Rect);
+            DrawPaletteItem(bounceBallSprite, new Rectangle(0, 0, 16, 16), BounceBallButton.Rect);
+            DrawPaletteItem(springSprite, new Rectangle(0, 0, 16, 16), SpringButton.Rect);
         }
     }
 
@@ -482,6 +597,36 @@ public sealed class EditorMode : GameMode
         int width = (int)(source.Width * scale), height = (int)(source.Height * scale);
         var destination = new Rectangle(slot.Center.X - width / 2, slot.Center.Y - height / 2, width, height);
         Globals.spriteBatch.Draw(texture, destination, source, Color.White);
+    }
+
+    private void DrawGrid()
+    {
+        float spacing = 8 * camera.Zoom;
+        // Subpixel cells cannot be distinguished; avoid covering the level in white at overview zoom.
+        if (spacing < 4) return;
+        Matrix transform = WorldTransform();
+        float originX = transform.M41, originY = transform.M42;
+        int left = Math.Max(sidebarOpen ? (int)(SidebarWidth * uiScale) : 0,
+            (int)MathF.Ceiling(originX));
+        int top = Math.Max(0, (int)MathF.Ceiling(originY));
+        int right = Math.Min(windowWidth, (int)MathF.Ceiling(originX + preview.Width * spacing));
+        int bottom = Math.Min(windowHeight, (int)MathF.Ceiling(originY + preview.Height * spacing));
+        if (right <= left || bottom <= top) return;
+        Color color = Color.White * 0.3f;
+        int firstColumn = Math.Max(0, (int)MathF.Ceiling((left - originX) / spacing));
+        int lastColumn = Math.Min(preview.Width, (int)MathF.Floor((right - originX) / spacing));
+        for (int column = firstColumn; column <= lastColumn; column++)
+        {
+            int x = (int)MathF.Round(originX + column * spacing);
+            if (x < right) Fill(new Rectangle(x, top, 1, bottom - top), color);
+        }
+        int firstRow = Math.Max(0, (int)MathF.Ceiling((top - originY) / spacing));
+        int lastRow = Math.Min(preview.Height, (int)MathF.Floor((bottom - originY) / spacing));
+        for (int row = firstRow; row <= lastRow; row++)
+        {
+            int y = (int)MathF.Round(originY + row * spacing);
+            if (y < bottom) Fill(new Rectangle(left, y, right - left, 1), color);
+        }
     }
 
     private void Fill(Rectangle rectangle, Color color) => Globals.spriteBatch.Draw(pixel, rectangle, color);

@@ -7,15 +7,20 @@ using NodeTesting.models;
 
 namespace uptown;
 
+public enum BounceDirection { Up, Right, Down, Left }
+
 // A special object placed in the editor. X/Y are its feet (bottom-center), like the spawn.
 public sealed class LevelObject
 {
     public const string Checkpoint = "checkpoint";
     public const string ExitFlag = "exit";
+    public const string BounceBall = "bounceball";
+    public const string Spring = "spring";
 
     public string Type { get; set; }
     public int X { get; set; }
     public int Y { get; set; }
+    public BounceDirection Direction { get; set; } = BounceDirection.Up;
 }
 
 public sealed class LevelData
@@ -37,7 +42,8 @@ public sealed class LevelData
     {
         var data = new LevelData { Width = map.Width, Height = map.Height };
         if (objects != null)
-            foreach (var item in objects) data.Objects.Add(new LevelObject { Type = item.Type, X = item.X, Y = item.Y });
+            foreach (var item in objects) data.Objects.Add(new LevelObject
+                { Type = item.Type, X = item.X, Y = item.Y, Direction = item.Direction });
         data.Terrain = new int[data.Height][];
         for (int y = 0; y < data.Height; y++)
         {

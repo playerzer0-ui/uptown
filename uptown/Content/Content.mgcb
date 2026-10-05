@@ -116,6 +116,18 @@
 /processorParam:TextureFormat=Color
 /build:graphics/player/walk.png
 
+#begin graphics/special_objects/bounceball.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:graphics/special_objects/bounceball.png;graphics/special_objects/bounceball
+
 #begin graphics/special_objects/checkpoint.png
 /importer:TextureImporter
 /processor:TextureProcessor
@@ -139,6 +151,18 @@
 /processorParam:MakeSquare=False
 /processorParam:TextureFormat=Color
 /build:graphics/special_objects/exit_flag.png
+
+#begin graphics/special_objects/spring.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:graphics/special_objects/spring.png;graphics/special_objects/spring
 
 #begin graphics/tileset/basic.png
 /importer:TextureImporter

@@ -34,6 +34,8 @@ public sealed class PlayMode : GameMode
             var feet = new Vector2(item.X, item.Y);
             if (item.Type == LevelObject.Checkpoint) entities.Add(new Checkpoint(feet));
             else if (item.Type == LevelObject.ExitFlag) entities.Add(new ExitFlag(feet));
+            else if (item.Type == LevelObject.BounceBall) entities.Add(new BounceBall(feet, item.Direction));
+            else if (item.Type == LevelObject.Spring) entities.Add(new Spring(feet, item.Direction));
         }
         UpdateCamera();
     }
