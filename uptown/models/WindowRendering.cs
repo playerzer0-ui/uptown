@@ -3,7 +3,7 @@ using Microsoft.Xna.Framework;
 
 namespace NodeTesting.models;
 
-// Editor and gameplay rasterize sprites directly at window resolution.
+// Every screen rasterizes sprites directly at window resolution.
 public static class WindowRendering
 {
     public static int ScaleFor(int width, int height) =>

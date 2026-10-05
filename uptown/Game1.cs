@@ -13,12 +13,11 @@ namespace uptown
     {
         private GraphicsDeviceManager _graphics;
         private SpriteBatch _spriteBatch;
-        private Canvas _canvas;
         private readonly Dictionary<ModeId, GameMode> _modes = new();
         private GameMode _activeMode;
         public ModeId CurrentMode { get; private set; }
-        private const int CanvasWidth = 320;
-        private const int CanvasHeight = 180;
+        private const int InitialWindowWidth = 1280;
+        private const int InitialWindowHeight = 720;
 
         public Game1()
         {
@@ -29,8 +28,8 @@ namespace uptown
 
         protected override void Initialize()
         {
-            _graphics.PreferredBackBufferWidth = CanvasWidth * 4;
-            _graphics.PreferredBackBufferHeight = CanvasHeight * 4;
+            _graphics.PreferredBackBufferWidth = InitialWindowWidth;
+            _graphics.PreferredBackBufferHeight = InitialWindowHeight;
             Window.AllowUserResizing = true;
             _graphics.ApplyChanges();
 
@@ -45,9 +44,8 @@ namespace uptown
             Globals.spriteBatch = _spriteBatch;
             Globals.graphics = _graphics;
 
-            _canvas = new Canvas(GraphicsDevice, Window, CanvasWidth, CanvasHeight);
-            _modes.Add(ModeId.Editor, new EditorMode(SwitchMode, message => Window.Title = message));
-            _modes.Add(ModeId.Home, new HomeMode(_canvas.ScreenToCanvas,
+            _modes.Add(ModeId.Editor, new EditorMode(SwitchMode, message => Window.Title = message, StartSaveValidation));
+            _modes.Add(ModeId.Home, new HomeMode(
                 play: () => SwitchMode(ModeId.Play),
                 create: () => SwitchMode(ModeId.Editor),
                 listLevels: LevelData.ListSaves,
@@ -74,17 +72,8 @@ namespace uptown
 
         protected override void Draw(GameTime gameTime)
         {
-            if (CurrentMode is ModeId.Editor or ModeId.Play)
-            {
-                GraphicsDevice.SetRenderTarget(null);
-                _activeMode.Draw();
-            }
-            else
-            {
-                _canvas.Activate();
-                _activeMode.Draw();
-                _canvas.Draw(_spriteBatch);
-            }
+            GraphicsDevice.SetRenderTarget(null);
+            _activeMode.Draw();
 
             base.Draw(gameTime);
         }
@@ -114,8 +103,20 @@ namespace uptown
                     Window.Title = "Paint a platform first, or set a clear spawn with P + click.";
                     return;
                 }
-                _modes[ModeId.Play] = new PlayMode(data);
+                _modes[ModeId.Play] = new PlayMode(data, () => SwitchMode(ModeId.Editor));
             }
+            ActivateMode(mode);
+        }
+
+        private void StartSaveValidation(LevelData data, Func<bool> saveClearedLevel)
+        {
+            _modes[ModeId.Play] = new PlayMode(data, () => SwitchMode(ModeId.Editor), saveClearedLevel);
+            ActivateMode(ModeId.Play);
+            Window.Title = "Clear this level to save it — reach the exit flag | Stop or F2: cancel";
+        }
+
+        private void ActivateMode(ModeId mode)
+        {
             if (!_modes.TryGetValue(mode, out var next))
                 throw new ArgumentOutOfRangeException(nameof(mode));
             if (ReferenceEquals(next, _activeMode)) return;

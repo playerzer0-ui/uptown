@@ -14,6 +14,7 @@ public sealed class EditorMode : GameMode
 {
     private AutoTileMap preview;
     private readonly Action<string> showStatus;
+    private readonly Action<LevelData, Func<bool>> startSaveValidation;
     private Point? spawn;
     private string savePath;
     private LevelData snapshot;
@@ -51,7 +52,10 @@ public sealed class EditorMode : GameMode
     private bool fittedView = true;
     private int wheelRemainder;
     private readonly Action<ModeId> switchMode;
-    private readonly SpriteSheet icons;
+    private readonly Texture2D saveIcon;
+    private readonly Texture2D playIcon;
+    private readonly Texture2D homeIcon;
+    private readonly Texture2D arrowIcon;
     private readonly Texture2D tileset;
     private readonly Texture2D playerSprite;
     private readonly Texture2D checkpointSprite;
@@ -71,13 +75,17 @@ public sealed class EditorMode : GameMode
     private readonly CollisionRect HomeButton;
     private readonly CollisionRect ToggleButton;
 
-    public EditorMode(Action<ModeId> switchMode, Action<string> showStatus)
+    public EditorMode(Action<ModeId> switchMode, Action<string> showStatus, Action<LevelData, Func<bool>> startSaveValidation)
     {
         viewWidth = 320;
         viewHeight = 180;
         this.switchMode = switchMode;
         this.showStatus = showStatus;
-        icons = new SpriteSheet("graphics/ui/UI_buttons", 5);
+        this.startSaveValidation = startSaveValidation;
+        saveIcon = Globals.Content.Load<Texture2D>("graphics/ui/save");
+        playIcon = Globals.Content.Load<Texture2D>("graphics/ui/play");
+        homeIcon = Globals.Content.Load<Texture2D>("graphics/ui/home");
+        arrowIcon = Globals.Content.Load<Texture2D>("graphics/ui/arrow-left");
         bars = new[]
         {
             Globals.Content.Load<Texture2D>("graphics/ui/tilebar"),
@@ -131,7 +139,7 @@ public sealed class EditorMode : GameMode
     {
         preview.Update(gameTime);
         bool control = Globals.Input.KeyDown(Keys.LeftControl) || Globals.Input.KeyDown(Keys.RightControl);
-        if (control && Globals.Input.KeyJustDown(Keys.S)) SaveLevel();
+        if (control && Globals.Input.KeyJustDown(Keys.S)) { SaveLevel(); return; }
         if (control && Globals.Input.KeyJustDown(Keys.Right)) ExpandLevel(40, 0);
         if (control && Globals.Input.KeyJustDown(Keys.Down)) ExpandLevel(0, 20);
         if (Globals.Input.KeyJustDown(Keys.F)) FitLevel();
@@ -336,10 +344,10 @@ public sealed class EditorMode : GameMode
         {
             DrawPalette();
         }
-        DrawButton(SaveButton, 1, new Color(125, 151, 161));
-        DrawButton(PlayButton, 0, new Color(225, 69, 59));
-        DrawButton(HomeButton, 2, new Color(149, 213, 112));
-        DrawButton(ToggleButton, 4, new Color(24, 100, 127),
+        DrawButton(SaveButton, saveIcon, new Color(125, 151, 161));
+        DrawButton(PlayButton, playIcon, new Color(225, 69, 59));
+        DrawButton(HomeButton, homeIcon, new Color(149, 213, 112));
+        DrawButton(ToggleButton, arrowIcon, new Color(24, 100, 127),
             effects: sidebarOpen ? SpriteEffects.None : SpriteEffects.FlipHorizontally);
         Globals.spriteBatch.End();
     }
@@ -361,18 +369,43 @@ public sealed class EditorMode : GameMode
 
     public void SaveLevel()
     {
+        var data = Capture();
+        if (!data.Objects.Exists(item => item.Type == LevelObject.ExitFlag))
+        {
+            showStatus("Cannot save: place an exit flag first.");
+            return;
+        }
+        if (!data.ValidSpawn())
+        {
+            showStatus("Cannot save: set a clear player spawn or paint a platform first.");
+            return;
+        }
+        foreach (var item in objects)
+            if (!ObjectFits(new Point(item.X, item.Y), item.Type, item, item.Direction))
+            {
+                showStatus("Cannot save: an object is blocked or a spring has no supporting terrain.");
+                return;
+            }
+        string path = savePath ?? Path.Combine(LevelData.SaveFolder(),
+            "Level-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + ".uptown");
+        data.Name = Path.GetFileNameWithoutExtension(path);
+        // Only this exact snapshot is saved after its fresh playtest reaches an exit.
+        startSaveValidation(data, () => SaveClearedLevel(data, path));
+    }
+
+    private bool SaveClearedLevel(LevelData data, string path)
+    {
         try
         {
-            if (savePath == null)
-                savePath = Path.Combine(LevelData.SaveFolder(), "Level-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + ".uptown");
-            var data = Capture();
-            data.Name = Path.GetFileNameWithoutExtension(savePath);
-            data.Save(savePath);
-            showStatus("Saved: " + savePath);
+            data.Save(path);
+            savePath = path;
+            showStatus("Congratulations! Level cleared and saved: " + path);
+            return true;
         }
         catch (Exception error) when (error is IOException || error is UnauthorizedAccessException)
         {
             showStatus("Save failed: " + error.Message);
+            return false;
         }
     }
 
@@ -747,7 +780,7 @@ public sealed class EditorMode : GameMode
         }
     }
 
-    private void DrawButton(CollisionRect button, int iconIndex, Color background, bool enabled = true,
+    private void DrawButton(CollisionRect button, Texture2D icon, Color background, bool enabled = true,
         SpriteEffects effects = SpriteEffects.None)
     {
         Rectangle bounds = button.Rect;
@@ -755,8 +788,10 @@ public sealed class EditorMode : GameMode
         button.Draw(hovered ? Color.White : new Color(24, 48, 63));
         var inset = new Rectangle(bounds.X + 1, bounds.Y + 1, bounds.Width - 2, bounds.Height - 2);
         Fill(inset, hovered ? Color.Lerp(background, Color.White, 0.2f) : background);
-        float scale = Math.Min(1f, (float)(bounds.Width - 2) / icons.FrameWidth);
-        icons.DrawFrame(iconIndex, button.Center, scale,
-            enabled ? Color.White : new Color(150, 150, 150), effects);
+        float scale = Math.Min(1f, Math.Min((float)(bounds.Width - 2) / icon.Width,
+            (float)(bounds.Height - 2) / icon.Height));
+        Globals.spriteBatch.Draw(icon, button.Center, null,
+            enabled ? Color.White : new Color(150, 150, 150), 0,
+            new Vector2(icon.Width / 2f, icon.Height / 2f), scale, effects, 0);
     }
 }

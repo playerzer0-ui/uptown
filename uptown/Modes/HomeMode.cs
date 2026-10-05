@@ -7,7 +7,7 @@ using NodeTesting.models;
 
 namespace uptown.Modes;
 
-// Title screen plus a level picker. Draws on the 320x180 canvas, so the mouse is mapped into canvas space.
+// Title screen and level picker use the same direct window rendering as the other modes.
 public sealed class HomeMode : GameMode
 {
     private const int ButtonWidth = 96;
@@ -16,10 +16,13 @@ public sealed class HomeMode : GameMode
     private static readonly Color Ink = new(24, 48, 63);
     private static readonly Rectangle ListBox = new(56, 40, 208, 128);
     private static readonly RasterizerState Clip = new() { ScissorTestEnable = true };
-    private readonly Func<Vector2, Vector2> screenToCanvas;
+    private int uiScale = 1;
+    private Vector2 uiOffset;
+    private int windowWidth;
+    private int windowHeight;
     private readonly Func<string[]> listLevels;
     private readonly Action<string> load;
-    private readonly SpriteSheet icons;
+    private readonly Texture2D backIcon;
     private readonly SpriteFont font;
     private readonly MenuButton[] buttons;
     private readonly CollisionRect backButton = new(24, 20, 24, 24);
@@ -29,25 +32,25 @@ public sealed class HomeMode : GameMode
     private string[] levels = Array.Empty<string>();
     private float scroll;
 
-    private sealed record MenuButton(string Label, int Icon, Color Background, CollisionRect Bounds, Action Click);
+    private sealed record MenuButton(string Label, Texture2D Icon, Color Background, CollisionRect Bounds, Action Click);
 
-    public HomeMode(Func<Vector2, Vector2> screenToCanvas, Action play, Action create,
+    public HomeMode(Action play, Action create,
         Func<string[]> listLevels, Action<string> load, Action exit)
     {
-        this.screenToCanvas = screenToCanvas;
         this.listLevels = listLevels;
         this.load = load;
-        icons = new SpriteSheet("graphics/ui/UI_buttons", 5);
+        backIcon = Globals.Content.Load<Texture2D>("graphics/ui/arrow-left");
         font = Globals.Content.Load<SpriteFont>("File");
         // CollisionRect constructors take center coordinates, not top-left.
-        MenuButton Button(string label, int icon, Color background, int y, Action click) =>
-            new(label, icon, background, new CollisionRect(160, y, ButtonWidth, ButtonHeight), click);
+        MenuButton Button(string label, string icon, Color background, int y, Action click) =>
+            new(label, Globals.Content.Load<Texture2D>($"graphics/ui/{icon}"), background,
+                new CollisionRect(160, y, ButtonWidth, ButtonHeight), click);
         buttons = new[]
         {
-            Button("Play", 0, new Color(225, 69, 59), 70, play),
-            Button("Create", 3, new Color(24, 100, 127), 96, create),
-            Button("Load", 1, new Color(125, 151, 161), 122, OpenLevelList),
-            Button("Exit", 2, new Color(149, 213, 112), 148, exit),
+            Button("Play", "play", new Color(225, 69, 59), 70, play),
+            Button("Create", "create", new Color(24, 100, 127), 96, create),
+            Button("Load", "save", new Color(125, 151, 161), 122, OpenLevelList),
+            Button("Exit", "stop", new Color(149, 213, 112), 148, exit),
         };
     }
 
@@ -59,9 +62,10 @@ public sealed class HomeMode : GameMode
 
     public override void Update(GameTime gameTime)
     {
+        RefreshLayout();
         MouseState mouse = Mouse.GetState();
-        Vector2 canvas = screenToCanvas(new Vector2(mouse.X, mouse.Y));
-        pointer = new Point((int)MathF.Floor(canvas.X), (int)MathF.Floor(canvas.Y));
+        Vector2 menu = ScreenToMenu(new Vector2(mouse.X, mouse.Y));
+        pointer = new Point((int)MathF.Floor(menu.X), (int)MathF.Floor(menu.Y));
         bool clicked = mouse.LeftButton == ButtonState.Pressed && previousMouse.LeftButton == ButtonState.Released;
         int wheel = mouse.ScrollWheelValue - previousMouse.ScrollWheelValue;
         previousMouse = mouse;
@@ -83,8 +87,9 @@ public sealed class HomeMode : GameMode
 
     public override void Draw()
     {
+        RefreshLayout();
         Globals.graphics.GraphicsDevice.Clear(new Color(0, 174, 220));
-        Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp);
+        Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp, transformMatrix: UiTransform());
         if (choosingLevel) DrawLevelList();
         else DrawMenu();
         Globals.spriteBatch.End();
@@ -117,7 +122,7 @@ public sealed class HomeMode : GameMode
         {
             Rectangle bounds = button.Bounds.Rect;
             DrawPanel(button.Bounds, button.Background);
-            icons.DrawFrame(button.Icon, new Vector2(bounds.X + 13, bounds.Center.Y), 1f, Color.White);
+            DrawIcon(button.Icon, new Vector2(bounds.X + 13, bounds.Center.Y));
             DrawText(button.Label, new Vector2(bounds.Center.X + 8, bounds.Center.Y), 1f, Color.White);
         }
     }
@@ -126,7 +131,7 @@ public sealed class HomeMode : GameMode
     {
         DrawText("Load Level", new Vector2(160, 20), 1f, Color.White);
         DrawPanel(backButton, new Color(24, 100, 127));
-        icons.DrawFrame(3, backButton.Center, 1f, Color.White);
+        DrawIcon(backIcon, backButton.Center);
 
         Fill(new Rectangle(ListBox.X - 1, ListBox.Y - 1, ListBox.Width + 2, ListBox.Height + 2), Ink);
         Fill(ListBox, new Color(123, 211, 235));
@@ -140,8 +145,9 @@ public sealed class HomeMode : GameMode
         Globals.spriteBatch.End();
         var device = Globals.graphics.GraphicsDevice;
         Rectangle previousScissor = device.ScissorRectangle;
-        device.ScissorRectangle = ListBox;
-        Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp, rasterizerState: Clip);
+        device.ScissorRectangle = ListScissor();
+        Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp, rasterizerState: Clip,
+            transformMatrix: UiTransform());
         int? hovered = HoveredRow();
         int first = (int)(scroll / RowHeight);
         for (int i = first; i < levels.Length && i * RowHeight - scroll < ListBox.Height; i++)
@@ -156,7 +162,7 @@ public sealed class HomeMode : GameMode
         }
         Globals.spriteBatch.End();
         device.ScissorRectangle = previousScissor;
-        Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp);
+        Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp, transformMatrix: UiTransform());
 
         // Scrollbar thumb, only when the list overflows.
         float max = MaxScroll();
@@ -167,6 +173,37 @@ public sealed class HomeMode : GameMode
             Fill(new Rectangle(ListBox.Right - 4, y, 3, thumb), Ink);
         }
     }
+
+    private void RefreshLayout()
+    {
+        var bounds = Globals.graphics.GraphicsDevice.PresentationParameters.Bounds;
+        SetViewport(bounds.Width, bounds.Height);
+    }
+
+    private void SetViewport(int width, int height)
+    {
+        if (width <= 0 || height <= 0 || (width == windowWidth && height == windowHeight)) return;
+        windowWidth = width;
+        windowHeight = height;
+        uiScale = WindowRendering.ScaleFor(width, height);
+        // Center the menu's layout without rendering it to an intermediate canvas.
+        uiOffset = new Vector2(MathF.Round((width - 320 * uiScale) / 2f),
+            MathF.Round((height - 180 * uiScale) / 2f));
+    }
+
+    private Matrix UiTransform() =>
+        Matrix.CreateScale(uiScale) * Matrix.CreateTranslation(uiOffset.X, uiOffset.Y, 0);
+
+    private Vector2 ScreenToMenu(Vector2 screen) => (screen - uiOffset) / uiScale;
+
+    private Rectangle ListScissor() => Rectangle.Intersect(
+        new Rectangle((int)uiOffset.X + ListBox.X * uiScale, (int)uiOffset.Y + ListBox.Y * uiScale,
+            ListBox.Width * uiScale, ListBox.Height * uiScale),
+        new Rectangle(0, 0, windowWidth, windowHeight));
+
+    private static void DrawIcon(Texture2D icon, Vector2 center) =>
+        Globals.spriteBatch.Draw(icon, center, null, Color.White, 0,
+            new Vector2(icon.Width / 2f, icon.Height / 2f), 1f, SpriteEffects.None, 0);
 
     private void DrawPanel(CollisionRect button, Color background)
     {
