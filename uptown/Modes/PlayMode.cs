@@ -16,32 +16,34 @@ public sealed class PlayMode : GameMode
     private readonly EntityList entities = new();
     private readonly SpriteFont font;
     private bool levelComplete;
-    private readonly int viewWidth;
-    private readonly int viewHeight;
+    private float viewWidth;
+    private float viewHeight;
+    private int windowWidth;
+    private int windowHeight;
+    private int renderScale = 1;
 
-    public PlayMode(int viewWidth, int viewHeight, LevelData level)
+    public PlayMode(LevelData level)
     {
-        this.viewWidth = viewWidth;
-        this.viewHeight = viewHeight;
         tileMap = new AutoTileMap("graphics/tileset/basic", level.CreateGrid(false));
         var collisions = new CollisionMap("graphics/tileset/collision", 8, 8,
             level.CreateGrid(true));
         player = new Player(collisions, new Vector2(level.SpawnX, level.SpawnY));
-        camera = new Camera { Origin = new Vector2(viewWidth / 2f, viewHeight / 2f) };
+        camera = new Camera();
         font = Globals.Content.Load<SpriteFont>("File");
         foreach (var item in level.Objects)
         {
             var feet = new Vector2(item.X, item.Y);
-            if (item.Type == LevelObject.Checkpoint) entities.Add(new Checkpoint(feet));
-            else if (item.Type == LevelObject.ExitFlag) entities.Add(new ExitFlag(feet));
+            if (item.Type == LevelObject.Checkpoint) entities.Add(new Checkpoint(feet, item.Direction));
+            else if (item.Type == LevelObject.ExitFlag) entities.Add(new ExitFlag(feet, item.Direction));
             else if (item.Type == LevelObject.BounceBall) entities.Add(new BounceBall(feet, item.Direction));
             else if (item.Type == LevelObject.Spring) entities.Add(new Spring(feet, item.Direction));
         }
-        UpdateCamera();
+        RefreshLayout();
     }
 
     public override void Update(GameTime gameTime)
     {
+        RefreshLayout();
         tileMap.Update(gameTime);
         // Once the level is complete the player freezes; objects keep animating.
         if (!levelComplete) player.Update(gameTime);
@@ -54,8 +56,10 @@ public sealed class PlayMode : GameMode
 
     public override void Draw()
     {
+        RefreshLayout();
         Globals.graphics.GraphicsDevice.Clear(PicoPallete.blue);
-        Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp, transformMatrix: camera.Transform());
+        Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp,
+            transformMatrix: WindowRendering.PixelAligned(camera.Transform()));
         tileMap.Draw();
         entities.Draw();
         player.Draw();
@@ -64,7 +68,8 @@ public sealed class PlayMode : GameMode
         if (levelComplete)
         {
             // Screen-space overlay, drawn without the camera transform.
-            Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp);
+            Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp,
+                transformMatrix: Matrix.CreateScale(renderScale));
             DrawCenteredText("LEVEL", new Vector2(viewWidth / 2f, viewHeight / 2f - 14), 2f);
             DrawCenteredText("COMPLETE", new Vector2(viewWidth / 2f, viewHeight / 2f + 14), 2f);
             Globals.spriteBatch.End();
@@ -95,12 +100,31 @@ public sealed class PlayMode : GameMode
         Globals.spriteBatch.DrawString(font, text, center, Color.White, 0f, origin, scale, SpriteEffects.None, 0f);
     }
 
+    private void RefreshLayout()
+    {
+        var bounds = Globals.graphics.GraphicsDevice.PresentationParameters.Bounds;
+        SetViewport(bounds.Width, bounds.Height);
+    }
+
+    private void SetViewport(int width, int height)
+    {
+        if (width <= 0 || height <= 0 || (width == windowWidth && height == windowHeight)) return;
+        windowWidth = width;
+        windowHeight = height;
+        renderScale = WindowRendering.ScaleFor(width, height);
+        viewWidth = (float)width / renderScale;
+        viewHeight = (float)height / renderScale;
+        camera.Zoom = renderScale;
+        camera.Origin = new Vector2(width / 2f, height / 2f);
+        UpdateCamera();
+    }
+
     private void UpdateCamera()
     {
         float x = MathHelper.Clamp(player.Position.X - viewWidth / 2f, 0,
             Math.Max(0, tileMap.Width * tileMap.TileSizeX - viewWidth));
         float y = MathHelper.Clamp(player.Position.Y - viewHeight / 2f, 0,
             Math.Max(0, tileMap.Height * tileMap.TileSizeY - viewHeight));
-        camera.Position = new Vector2(MathF.Round(x), MathF.Round(y)) + camera.Origin;
+        camera.Position = new Vector2(x + viewWidth / 2f, y + viewHeight / 2f);
     }
 }

@@ -5,6 +5,7 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using NodeTesting.models;
+using uptown.SpecialObjects;
 
 namespace uptown.Modes;
 
@@ -30,6 +31,7 @@ public sealed class EditorMode : GameMode
     private readonly CollisionRect SpringButton = new(48, 52, 27, 27);
     private BounceDirection bounceDirection;
     private BounceDirection ghostDirection;
+    private bool manualSpringDirection;
     private Tool tool;
     private readonly List<LevelObject> objects = new();
     // While dragging the spawn or an object: where it would drop, and whether that spot is allowed.
@@ -133,12 +135,6 @@ public sealed class EditorMode : GameMode
         if (control && Globals.Input.KeyJustDown(Keys.Right)) ExpandLevel(40, 0);
         if (control && Globals.Input.KeyJustDown(Keys.Down)) ExpandLevel(0, 20);
         if (Globals.Input.KeyJustDown(Keys.F)) FitLevel();
-        if (tool == Tool.BounceBall && Globals.Input.KeyJustDown(Keys.R))
-        {
-            bounceDirection = (BounceDirection)(((int)bounceDirection + 1) % 4);
-            ghostDirection = bounceDirection;
-            showStatus($"Bounceball: {bounceDirection} | R: rotate");
-        }
         RefreshLayout();
         MouseState mouse = Mouse.GetState();
         Vector2 position = new Vector2(mouse.X, mouse.Y);
@@ -191,13 +187,19 @@ public sealed class EditorMode : GameMode
                 Tool selected = PaletteToolAt(pointer);
                 if (selected != Tool.None)
                 {
+                    if (tool != selected)
+                    {
+                        bounceDirection = BounceDirection.Up;
+                        manualSpringDirection = false;
+                    }
                     tool = selected;
                     draggingFromPalette = tool != Tool.Terrain;
-                    if (tool == Tool.BounceBall) showStatus($"Bounceball: {bounceDirection} | R: rotate");
+                    if (IsSpecialTool()) showStatus($"{SelectedObjectType()}: {bounceDirection} | R: rotate");
                 }
             }
             return;
         }
+        if (Globals.Input.KeyJustDown(Keys.R)) RotateObject(position, overLevel);
         if (overLevel && Globals.Input.KeyDown(Keys.P))
         {
             lastPaintCell = null;
@@ -213,7 +215,11 @@ public sealed class EditorMode : GameMode
                 if (!ghost.HasValue && !draggingFromPalette && tool != Tool.Spawn)
                 {
                     moving = ObjectUnder(position, SelectedObjectType());
-                    if (moving != null && tool == Tool.BounceBall) bounceDirection = moving.Direction;
+                    if (moving != null)
+                    {
+                        bounceDirection = moving.Direction;
+                        manualSpringDirection = tool == Tool.Spring;
+                    }
                 }
                 var cell = SpawnCellAt(position);
                 // Special sprites are 16px wide: center on a tile boundary so their
@@ -221,7 +227,11 @@ public sealed class EditorMode : GameMode
                 if (tool != Tool.Spawn) cell.X += 4;
                 ghost = cell;
                 ghostDirection = bounceDirection;
-                if (tool == Tool.Spring) TrySpringDirection(cell, out ghostDirection);
+                if (tool == Tool.Spring && !manualSpringDirection)
+                {
+                    TrySpringDirection(cell, out ghostDirection);
+                    bounceDirection = ghostDirection;
+                }
                 ghostValid = tool == Tool.Spawn
                     ? LevelData.Capture(preview, cell).ValidSpawn()
                     : ObjectFits(cell, SelectedObjectType(), moving, ghostDirection);
@@ -396,7 +406,7 @@ public sealed class EditorMode : GameMode
         if (!ghostValid)
         {
             showStatus(tool == Tool.Spring
-                ? "Spring needs clear space and a solid floor or wall across its base."
+                ? "Spring needs clear space and solid terrain across its mounting base."
                 : "Object needs clear space inside the level and can't share a spot.");
             return;
         }
@@ -404,7 +414,7 @@ public sealed class EditorMode : GameMode
         {
             // Only one exit: placing it again moves the existing one.
             objects.RemoveAll(item => item.Type == LevelObject.ExitFlag);
-            objects.Add(new LevelObject { Type = LevelObject.ExitFlag, X = feet.X, Y = feet.Y });
+            objects.Add(new LevelObject { Type = LevelObject.ExitFlag, X = feet.X, Y = feet.Y, Direction = ghostDirection });
         }
         else if (moving != null)
         {
@@ -423,6 +433,40 @@ public sealed class EditorMode : GameMode
         Tool.Exit => LevelObject.ExitFlag,
         _ => LevelObject.Checkpoint
     };
+
+    private bool IsSpecialTool() => tool is Tool.Checkpoint or Tool.Exit or Tool.BounceBall or Tool.Spring;
+
+    private void RotateObject(Vector2 screen, bool overLevel)
+    {
+        // A dragged preview has priority; otherwise rotate the topmost object under the cursor.
+        if (!ghost.HasValue && !draggingFromPalette && overLevel)
+        {
+            Vector2 world = Vector2.Transform(screen, Matrix.Invert(WorldTransform()));
+            for (int i = objects.Count - 1; i >= 0; i--)
+            {
+                var item = objects[i];
+                var feet = new Point(item.X, item.Y);
+                if (!ObjectRotation.Bounds(feet, item.Type, item.Direction).Contains(world)) continue;
+                var next = ObjectRotation.Next(item.Type, item.Direction);
+                if (!ObjectFits(feet, item.Type, item, next))
+                {
+                    showStatus("Rotation blocked: clear space and a supported spring base are required.");
+                    return;
+                }
+                item.Direction = next;
+                snapshot = Capture();
+                showStatus($"{item.Type}: {next} | R: rotate");
+                return;
+            }
+        }
+        if (!IsSpecialTool()) return;
+        bounceDirection = ObjectRotation.Next(SelectedObjectType(), bounceDirection);
+        ghostDirection = bounceDirection;
+        if (tool == Tool.Spring) manualSpringDirection = true;
+        if (ghost.HasValue)
+            ghostValid = ObjectFits(ghost.Value, SelectedObjectType(), moving, ghostDirection);
+        showStatus($"{SelectedObjectType()}: {bounceDirection} | R: rotate");
+    }
 
     private static bool IsLauncher(string type) =>
         type == LevelObject.BounceBall || type == LevelObject.Spring;
@@ -445,6 +489,12 @@ public sealed class EditorMode : GameMode
                 if (!preview.Occupied(x, feet.Y / 8)) return false;
             return true;
         }
+        if (direction == BounceDirection.Down)
+        {
+            for (int x = left; x <= right; x++)
+                if (!preview.Occupied(x, top - 1)) return false;
+            return true;
+        }
         if (direction is BounceDirection.Right or BounceDirection.Left)
         {
             int wall = direction == BounceDirection.Right ? left - 1 : right + 1;
@@ -457,8 +507,8 @@ public sealed class EditorMode : GameMode
 
     private bool TrySpringDirection(Point feet, out BounceDirection direction)
     {
-        // Prefer a floor mount at a corner, then a left or right wall.
-        foreach (var candidate in new[] { BounceDirection.Up, BounceDirection.Right, BounceDirection.Left })
+        // Prefer a floor mount at a corner, then walls or a ceiling.
+        foreach (var candidate in new[] { BounceDirection.Up, BounceDirection.Right, BounceDirection.Left, BounceDirection.Down })
             if (SpringSupported(feet, candidate)) { direction = candidate; return true; }
         direction = BounceDirection.Up;
         return false;
@@ -466,13 +516,8 @@ public sealed class EditorMode : GameMode
 
     private void DrawDirection(Point feet, BounceDirection direction, float alpha)
     {
-        Point axis = direction switch
-        {
-            BounceDirection.Right => new Point(1, 0),
-            BounceDirection.Down => new Point(0, 1),
-            BounceDirection.Left => new Point(-1, 0),
-            _ => new Point(0, -1)
-        };
+        Vector2 vector = ObjectRotation.Vector(direction);
+        Point axis = new(Math.Sign(vector.X), Math.Sign(vector.Y));
         var center = new Point(feet.X, feet.Y - 8);
         Color color = PicoPallete.dark_blue * alpha;
         for (int i = -2; i <= 2; i++)
@@ -489,20 +534,19 @@ public sealed class EditorMode : GameMode
         for (int i = objects.Count - 1; i >= 0; i--)
         {
             var item = objects[i];
-            int height = IsLauncher(item.Type) ? 16 : 32;
-            if (item.Type == type && new Rectangle(item.X - 8, item.Y - height, 16, height).Contains(world)) return item;
+            if (item.Type == type && ObjectRotation.Bounds(new Point(item.X, item.Y), type, item.Direction).Contains(world)) return item;
         }
         return null;
     }
 
-    // An object needs its 8x16 hitbox clear of terrain and inside the level, and can't sit on
+    // An object needs its rotated hitbox clear of terrain and inside the level, and can't sit on
     // another object's spot. The exit ignores the old exit, since dropping it moves that one.
     private bool ObjectFits(Point feet, string type, LevelObject ignore, BounceDirection direction = BounceDirection.Up)
     {
-        int halfWidth = IsLauncher(type) ? 8 : 4;
-        if (feet.X - halfWidth < 0 || feet.X + halfWidth > preview.Width * 8 || feet.Y - 16 < 0 || feet.Y > preview.Height * 8) return false;
-        for (int y = (feet.Y - 16) / 8; y <= (feet.Y - 1) / 8; y++)
-            for (int x = (feet.X - halfWidth) / 8; x <= (feet.X + halfWidth - 1) / 8; x++)
+        Rectangle bounds = ObjectRotation.Bounds(feet, type, direction, true);
+        if (bounds.Left < 0 || bounds.Right > preview.Width * 8 || bounds.Top < 0 || bounds.Bottom > preview.Height * 8) return false;
+        for (int y = bounds.Top / 8; y <= (bounds.Bottom - 1) / 8; y++)
+            for (int x = bounds.Left / 8; x <= (bounds.Right - 1) / 8; x++)
                 if (preview.Occupied(x, y)) return false;
         if (type == LevelObject.Spring && !SpringSupported(feet, direction)) return false;
         foreach (var item in objects)
@@ -516,20 +560,14 @@ public sealed class EditorMode : GameMode
     // First frame of the object's sprite at its feet; blocked spots are tinted red.
     private void DrawObject(string type, Point feet, bool valid, float alpha, BounceDirection direction = BounceDirection.Up)
     {
-        int halfWidth = IsLauncher(type) ? 8 : 4;
-        if (!valid) Fill(new Rectangle(feet.X - halfWidth, feet.Y - 16, halfWidth * 2, 16), Color.Red * 0.5f * alpha);
+        if (!valid) Fill(ObjectRotation.Bounds(feet, type, direction, true), Color.Red * 0.5f * alpha);
         Texture2D texture = ObjectTexture(type);
-        if (IsLauncher(type))
-        {
-            Globals.spriteBatch.Draw(texture, new Vector2(feet.X, feet.Y - 8),
-                new Rectangle(0, 0, 16, 16),
-                (valid ? Color.White : new Color(255, 120, 120)) * alpha,
-                (int)direction * MathHelper.PiOver2, new Vector2(8, 8), 1f, SpriteEffects.None, 0);
-            if (type == LevelObject.BounceBall) DrawDirection(feet, direction, alpha);
-            return;
-        }
-        Globals.spriteBatch.Draw(texture, new Vector2(feet.X - 8, feet.Y - 32), new Rectangle(0, 0, 16, 32),
-            (valid ? Color.White : new Color(255, 120, 120)) * alpha);
+        int height = IsLauncher(type) ? 16 : 32;
+        Rectangle spriteBounds = ObjectRotation.Bounds(feet, type, direction);
+        Globals.spriteBatch.Draw(texture, spriteBounds.Center.ToVector2(), new Rectangle(0, 0, 16, height),
+            (valid ? Color.White : new Color(255, 120, 120)) * alpha,
+            ObjectRotation.Angle(direction), new Vector2(8, height / 2), 1f, SpriteEffects.None, 0);
+        if (type == LevelObject.BounceBall) DrawDirection(feet, direction, alpha);
     }
 
     // Idle frame drawn at the feet position; invalid spots are tinted red.
@@ -633,10 +671,7 @@ public sealed class EditorMode : GameMode
 
     private Matrix WorldTransform()
     {
-        Matrix transform = camera.Transform();
-        transform.M41 = MathF.Round(transform.M41);
-        transform.M42 = MathF.Round(transform.M42);
-        return transform;
+        return WindowRendering.PixelAligned(camera.Transform());
     }
 
     private void RefreshLayout()
@@ -647,7 +682,7 @@ public sealed class EditorMode : GameMode
         bool hadLayout = windowWidth > 0;
         windowWidth = bounds.Width;
         windowHeight = bounds.Height;
-        uiScale = Math.Max(1, Math.Min(windowWidth / 320, windowHeight / 180));
+        uiScale = WindowRendering.ScaleFor(windowWidth, windowHeight);
         viewWidth = (int)MathF.Ceiling(windowWidth / uiScale);
         viewHeight = (int)MathF.Ceiling(windowHeight / uiScale);
         if (hadLayout)

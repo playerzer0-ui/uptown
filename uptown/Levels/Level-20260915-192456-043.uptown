@@ -2489,5 +2489,31 @@
       0,
       0
     ]
+  ],
+  "Objects": [
+    {
+      "Type": "exit",
+      "X": 216,
+      "Y": 256,
+      "Direction": 0
+    },
+    {
+      "Type": "spring",
+      "X": 144,
+      "Y": 256,
+      "Direction": 0
+    },
+    {
+      "Type": "bounceball",
+      "X": 152,
+      "Y": 232,
+      "Direction": 0
+    },
+    {
+      "Type": "checkpoint",
+      "X": 104,
+      "Y": 264,
+      "Direction": 0
+    }
   ]
 }

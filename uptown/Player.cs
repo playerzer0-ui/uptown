@@ -252,13 +252,7 @@ public class Player
     public void Bounce(BounceDirection direction, float speed)
     {
         TryStand();
-        velocity = direction switch
-        {
-            BounceDirection.Right => new Vector2(speed, -speed * 0.35f),
-            BounceDirection.Down => new Vector2(0, speed),
-            BounceDirection.Left => new Vector2(-speed, -speed * 0.35f),
-            _ => new Vector2(velocity.X, -speed)
-        };
+        velocity = uptown.SpecialObjects.ObjectRotation.Vector(direction) * speed;
         remainder = Vector2.Zero;
         jumpBuffer = jumpHoldTime = coyoteTime = 0;
         // Preserve sideways launch momentum and prevent an immediate wall grab.

@@ -17,7 +17,7 @@ public abstract class BounceObject : SpecialObject
         Direction = direction;
         Sprite = new SpriteAnimation(texture, frames, fps);
         Sprite.Origin = new Vector2(8, 8);
-        Sprite.Rotation = (int)direction * MathHelper.PiOver2;
+        Sprite.Rotation = ObjectRotation.Angle(direction);
         Sprite.AddState("Idle", 0, 1, fps, false);
         Sprite.AddState("Bounce", 0, frames, fps, false);
         Sprite.Play("Idle");

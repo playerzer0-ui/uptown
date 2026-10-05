@@ -8,20 +8,26 @@ namespace uptown.SpecialObjects;
 public sealed class Checkpoint : SpecialObject
 {
     private readonly SpriteAnimation sprite = new("graphics/special_objects/checkpoint", 5, 8);
+    private readonly BounceDirection direction;
 
     /// <summary>True for the checkpoint the player will respawn at. Only one is current at a time.</summary>
     public bool IsCurrent { get; private set; }
 
-    public Checkpoint(Vector2 feet) : base(feet, 8, 16)
+    public Checkpoint(Vector2 feet, BounceDirection direction = BounceDirection.Up) : base(feet, 8, 16)
     {
-        sprite.Origin = new Vector2(8, 32);
+        this.direction = direction;
+        sprite.Origin = new Vector2(8, 16);
+        sprite.Rotation = ObjectRotation.Angle(direction);
+        var bounds = ObjectRotation.Bounds(feet.ToPoint(), LevelObject.Checkpoint, direction, true);
+        Collider = new CollisionRect(bounds.Center.X, bounds.Center.Y, bounds.Width, bounds.Height);
     }
 
     public override void Update(GameTime gameTime) => sprite.Update(gameTime);
 
     public override void Draw()
     {
-        sprite.Position = Position;
+        var bounds = ObjectRotation.Bounds(Position.ToPoint(), LevelObject.Checkpoint, direction);
+        sprite.Position = bounds.Center.ToVector2();
         sprite.Color = IsCurrent ? PicoPallete.green : Color.White;
         sprite.Draw();
     }

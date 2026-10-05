@@ -74,7 +74,7 @@ namespace uptown
 
         protected override void Draw(GameTime gameTime)
         {
-            if (CurrentMode == ModeId.Editor)
+            if (CurrentMode is ModeId.Editor or ModeId.Play)
             {
                 GraphicsDevice.SetRenderTarget(null);
                 _activeMode.Draw();
@@ -114,7 +114,7 @@ namespace uptown
                     Window.Title = "Paint a platform first, or set a clear spawn with P + click.";
                     return;
                 }
-                _modes[ModeId.Play] = new PlayMode(CanvasWidth, CanvasHeight, data);
+                _modes[ModeId.Play] = new PlayMode(data);
             }
             if (!_modes.TryGetValue(mode, out var next))
                 throw new ArgumentOutOfRangeException(nameof(mode));

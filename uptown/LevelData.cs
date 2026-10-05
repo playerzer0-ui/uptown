@@ -7,7 +7,8 @@ using NodeTesting.models;
 
 namespace uptown;
 
-public enum BounceDirection { Up, Right, Down, Left }
+// Keep the original cardinal values compatible with existing level files.
+public enum BounceDirection { Up, Right, Down, Left, UpRight, DownRight, DownLeft, UpLeft }
 
 // A special object placed in the editor. X/Y are its feet (bottom-center), like the spawn.
 public sealed class LevelObject
