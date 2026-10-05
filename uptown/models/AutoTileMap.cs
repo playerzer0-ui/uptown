@@ -114,9 +114,32 @@ public sealed class AutoTileMap : Map
         return diagonal ? 6 : Inner[quadrant];
     }
 
+    // Recognize shapes supplied as complete tiles by the atlas. Preserve their
+    // inward-facing detail instead of replacing it with quarters of the center.
+    // Other shapes (thin strips, isolated cells, multiple notches) need assembly.
+    public static int SelectFullTile(int topLeft, int topRight, int bottomLeft, int bottomRight) =>
+        (topLeft, topRight, bottomLeft, bottomRight) switch
+        {
+            (0, 1, 5, 6) => 0,
+            (1, 1, 6, 6) => 1,
+            (1, 2, 6, 7) => 2,
+            (5, 6, 5, 6) => 5,
+            (6, 6, 6, 6) => 6,
+            (6, 7, 6, 7) => 7,
+            (5, 6, 10, 11) => 10,
+            (6, 6, 11, 11) => 11,
+            (6, 7, 11, 12) => 12,
+            (9, 6, 6, 6) => 9,
+            (6, 8, 6, 6) => 8,
+            (6, 6, 4, 6) => 4,
+            (6, 6, 6, 3) => 3,
+            _ => -1
+        };
+
     private void Refresh(int x, int y)
     {
         if (!Occupied(x, y)) return;
+        Span<int> ids = stackalloc int[4];
         for (int q = 0; q < 4; q++)
         {
             int dx = q % 2 == 0 ? -1 : 1;
@@ -124,8 +147,16 @@ public sealed class AutoTileMap : Map
             int material = MaterialAt(x, y);
             int id = SelectTile(q, MaterialAt(x + dx, y) == material,
                 MaterialAt(x, y + dy) == material, MaterialAt(x + dx, y + dy) == material);
+            ids[q] = id;
             Rectangle source = TileSources[id];
             quarters[y, x, q] = new Rectangle(source.X + q % 2 * 4, source.Y + q / 2 * 4, 4, 4);
+        }
+        int fullTile = SelectFullTile(ids[0], ids[1], ids[2], ids[3]);
+        if (fullTile >= 0)
+        {
+            Rectangle source = TileSources[fullTile];
+            for (int q = 0; q < 4; q++)
+                quarters[y, x, q] = new Rectangle(source.X + q % 2 * 4, source.Y + q / 2 * 4, 4, 4);
         }
     }
 
