@@ -8,7 +8,7 @@ using NodeTesting.models;
 
 namespace uptown.Modes;
 
-// Layout and navigation first; painting and saving will follow.
+// Terrain painting, object placement, and category palettes.
 public sealed class EditorMode : GameMode
 {
     private AutoTileMap preview;
@@ -18,6 +18,10 @@ public sealed class EditorMode : GameMode
     private LevelData snapshot;
     public LevelData Capture() => LevelData.Capture(preview, spawn, objects);
     private enum Tool { None, Terrain, Spawn, Checkpoint, Exit }
+    private enum Palette { Terrain, Special, Sprites, Background }
+    private Palette palette;
+    private readonly Texture2D[] bars;
+    private bool draggingFromPalette;
     private readonly CollisionRect TerrainButton;
     private readonly CollisionRect SpawnButton;
     private readonly CollisionRect CheckpointButton;
@@ -66,15 +70,22 @@ public sealed class EditorMode : GameMode
         this.switchMode = switchMode;
         this.showStatus = showStatus;
         icons = new SpriteSheet("graphics/ui/UI_buttons", 5);
+        bars = new[]
+        {
+            Globals.Content.Load<Texture2D>("graphics/ui/tilebar"),
+            Globals.Content.Load<Texture2D>("graphics/ui/specialbar"),
+            Globals.Content.Load<Texture2D>("graphics/ui/spritebar"),
+            Globals.Content.Load<Texture2D>("graphics/ui/backgroundbar")
+        };
         // CollisionRect constructors take center coordinates, not top-left.
         SaveButton = new CollisionRect(viewWidth - 76, 16, ButtonSize, ButtonSize);
         PlayButton = new CollisionRect(viewWidth - 48, 16, ButtonSize, ButtonSize);
         HomeButton = new CollisionRect(viewWidth - 20, 16, ButtonSize, ButtonSize);
         ToggleButton = new CollisionRect(SidebarWidth + 6, viewHeight / 2, 12, 24);
-        TerrainButton = new CollisionRect(24, 24, 32, 32);
-        SpawnButton = new CollisionRect(56, 24, 32, 32);
-        CheckpointButton = new CollisionRect(24, 60, 32, 32);
-        ExitButton = new CollisionRect(56, 60, 32, 32);
+        TerrainButton = new CollisionRect(16, 21, 27, 27);
+        SpawnButton = new CollisionRect(16, 21, 27, 27);
+        CheckpointButton = new CollisionRect(16, 21, 27, 27);
+        ExitButton = new CollisionRect(48, 21, 27, 27);
         tileset = Globals.Content.Load<Texture2D>("graphics/tileset/basic");
         playerSprite = Globals.Content.Load<Texture2D>("graphics/player/idle");
         checkpointSprite = Globals.Content.Load<Texture2D>("graphics/special_objects/checkpoint");
@@ -152,6 +163,26 @@ public sealed class EditorMode : GameMode
         }
         previousMouse = mouse;
         if (isPanning) { lastPaintCell = null; CancelDrag(); return; }
+        if (clicked && sidebarOpen && pointer.X < SidebarWidth)
+        {
+            CancelDrag();
+            lastPaintCell = null;
+            if (pointer.X >= 64 && pointer.Y >= 0 && pointer.Y < 128)
+            {
+                palette = (Palette)(pointer.Y / 32);
+                tool = Tool.None;
+            }
+            else
+            {
+                Tool selected = PaletteToolAt(pointer);
+                if (selected != Tool.None)
+                {
+                    tool = selected;
+                    draggingFromPalette = tool != Tool.Terrain;
+                }
+            }
+            return;
+        }
         if (overLevel && Globals.Input.KeyDown(Keys.P))
         {
             lastPaintCell = null;
@@ -162,10 +193,10 @@ public sealed class EditorMode : GameMode
         if (tool is Tool.Spawn or Tool.Checkpoint or Tool.Exit)
         {
             bool held = mouse.LeftButton == ButtonState.Pressed;
-            if (held && (ghost.HasValue || (clicked && overLevel)))
+            if (held && (ghost.HasValue || ((clicked || draggingFromPalette) && overLevel)))
             {
                 // Pressing on an existing checkpoint picks it up instead of making a new one.
-                if (!ghost.HasValue && tool == Tool.Checkpoint)
+                if (!ghost.HasValue && !draggingFromPalette && tool == Tool.Checkpoint)
                     moving = ObjectUnder(position, LevelObject.Checkpoint);
                 var cell = SpawnCellAt(position);
                 if (cell != ghost)
@@ -184,6 +215,7 @@ public sealed class EditorMode : GameMode
                 CancelDrag();
                 return;
             }
+            if (!held) draggingFromPalette = false;
             // Right-click deletes the checkpoint or exit flag under the cursor.
             if (rightClicked && overLevel && tool != Tool.Spawn)
             {
@@ -212,11 +244,7 @@ public sealed class EditorMode : GameMode
         }
         else lastPaintCell = null;
         if (!clicked) return;
-        if (sidebarOpen && TerrainButton.Contains(pointer)) tool = Tool.Terrain;
-        else if (sidebarOpen && SpawnButton.Contains(pointer)) tool = Tool.Spawn;
-        else if (sidebarOpen && CheckpointButton.Contains(pointer)) tool = Tool.Checkpoint;
-        else if (sidebarOpen && ExitButton.Contains(pointer)) tool = Tool.Exit;
-        else if (ToggleButton.Contains(pointer))
+        if (ToggleButton.Contains(pointer))
         {
             Vector2 center = camera.Position + ViewCenter() / camera.Zoom;
             sidebarOpen = !sidebarOpen;
@@ -270,16 +298,7 @@ public sealed class EditorMode : GameMode
         Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp, transformMatrix: Matrix.CreateScale(uiScale));
         if (sidebarOpen)
         {
-            Fill(new Rectangle(0, 0, SidebarWidth, viewHeight), new Color(123, 211, 235));
-            Fill(new Rectangle(SidebarWidth - 1, 0, 1, viewHeight), new Color(24, 82, 104));
-            DrawToolButton(TerrainButton, Tool.Terrain);
-            Globals.spriteBatch.Draw(tileset, new Rectangle(12, 12, 24, 24), new Rectangle(8, 0, 8, 8), Color.White);
-            DrawToolButton(SpawnButton, Tool.Spawn);
-            Globals.spriteBatch.Draw(playerSprite, new Rectangle(44, 12, 24, 24), new Rectangle(0, 0, 16, 16), Color.White);
-            DrawToolButton(CheckpointButton, Tool.Checkpoint);
-            Globals.spriteBatch.Draw(checkpointSprite, new Rectangle(18, 48, 12, 24), new Rectangle(0, 0, 16, 32), Color.White);
-            DrawToolButton(ExitButton, Tool.Exit);
-            Globals.spriteBatch.Draw(exitSprite, new Rectangle(50, 48, 12, 24), new Rectangle(0, 0, 16, 32), Color.White);
+            DrawPalette();
         }
         DrawButton(SaveButton, 1, new Color(125, 151, 161));
         DrawButton(PlayButton, 0, new Color(225, 69, 59));
@@ -342,6 +361,7 @@ public sealed class EditorMode : GameMode
     {
         ghost = null;
         moving = null;
+        draggingFromPalette = false;
     }
 
     private void Drop(Point feet)
@@ -412,11 +432,56 @@ public sealed class EditorMode : GameMode
             (valid ? Color.White : new Color(255, 120, 120)) * alpha);
     }
 
-    private void DrawToolButton(CollisionRect button, Tool buttonTool)
+    private Tool PaletteToolAt(Point point)
     {
-        button.Draw(tool == buttonTool ? Color.Yellow : button.Contains(pointer) ? Color.White : new Color(24, 82, 104));
-        Rectangle bounds = button.Rect;
-        Fill(new Rectangle(bounds.X + 1, bounds.Y + 1, bounds.Width - 2, bounds.Height - 2), new Color(24, 100, 127));
+        if (palette == Palette.Terrain && TerrainButton.Contains(point)) return Tool.Terrain;
+        if (palette == Palette.Sprites && SpawnButton.Contains(point)) return Tool.Spawn;
+        if (palette == Palette.Special && CheckpointButton.Contains(point)) return Tool.Checkpoint;
+        if (palette == Palette.Special && ExitButton.Contains(point)) return Tool.Exit;
+        return Tool.None;
+    }
+
+    private void DrawPalette()
+    {
+        // Draw only the supplied artwork, without filling beyond its bounds.
+        Globals.spriteBatch.Draw(bars[(int)palette], new Rectangle(0, 0, 64, 180),
+            new Rectangle(0, 0, 64, 180), Color.White);
+        for (int i = 0; i < bars.Length; i++)
+        {
+            var tab = new Rectangle(64, i * 32, 16, 32);
+            Globals.spriteBatch.Draw(bars[i], tab, tab, Color.White);
+            if (tab.Contains(pointer)) Fill(tab, Color.White * 0.12f);
+        }
+        for (int row = 0; row < 3; row++)
+            for (int col = 0; col < 2; col++)
+            {
+                var slot = new Rectangle(3 + col * 32, 8 + row * 31, 27, 27);
+                Tool item = PaletteToolAt(slot.Center);
+                Color border = item != Tool.None && tool == item ? Color.Yellow
+                    : item != Tool.None && slot.Contains(pointer) ? Color.White : new Color(194, 195, 199);
+                Fill(slot, border);
+                Fill(new Rectangle(slot.X + 1, slot.Y + 1, slot.Width - 2, slot.Height - 2),
+                    new Color(95, 87, 79));
+            }
+        if (palette == Palette.Terrain)
+            DrawPaletteItem(tileset, new Rectangle(0, 0, 8, 8), TerrainButton.Rect);
+        else if (palette == Palette.Sprites)
+            DrawPaletteItem(playerSprite, new Rectangle(0, 0, 16, 16), SpawnButton.Rect);
+        else if (palette == Palette.Special)
+        {
+            DrawPaletteItem(checkpointSprite, new Rectangle(0, 0, 16, 32), CheckpointButton.Rect);
+            DrawPaletteItem(exitSprite, new Rectangle(0, 0, 16, 32), ExitButton.Rect);
+        }
+    }
+
+    private void DrawPaletteItem(Texture2D texture, Rectangle source, Rectangle slot)
+    {
+        // Integer scaling keeps small pixel-art thumbnails sharp and inside their slots.
+        float scale = Math.Max(0.5f, MathF.Floor(Math.Min(
+            (slot.Width - 4f) / source.Width, (slot.Height - 4f) / source.Height)));
+        int width = (int)(source.Width * scale), height = (int)(source.Height * scale);
+        var destination = new Rectangle(slot.Center.X - width / 2, slot.Center.Y - height / 2, width, height);
+        Globals.spriteBatch.Draw(texture, destination, source, Color.White);
     }
 
     private void Fill(Rectangle rectangle, Color color) => Globals.spriteBatch.Draw(pixel, rectangle, color);
