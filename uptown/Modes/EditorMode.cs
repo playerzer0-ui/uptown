@@ -24,7 +24,8 @@ public sealed class EditorMode : GameMode
     private Palette palette;
     private readonly Texture2D[] bars;
     private bool draggingFromPalette;
-    private readonly CollisionRect TerrainButton;
+    private readonly CollisionRect[] terrainButtons;
+    private int selectedTerrain;
     private readonly CollisionRect SpawnButton;
     private readonly CollisionRect CheckpointButton;
     private readonly CollisionRect ExitButton;
@@ -56,7 +57,7 @@ public sealed class EditorMode : GameMode
     private readonly Texture2D playIcon;
     private readonly Texture2D homeIcon;
     private readonly Texture2D arrowIcon;
-    private readonly Texture2D tileset;
+    private readonly Texture2D[] tilesets;
     private readonly Texture2D playerSprite;
     private readonly Texture2D checkpointSprite;
     private readonly Texture2D exitSprite;
@@ -98,11 +99,16 @@ public sealed class EditorMode : GameMode
         PlayButton = new CollisionRect(viewWidth - 48, 16, ButtonSize, ButtonSize);
         HomeButton = new CollisionRect(viewWidth - 20, 16, ButtonSize, ButtonSize);
         ToggleButton = new CollisionRect(SidebarWidth + 6, viewHeight / 2, 12, 24);
-        TerrainButton = new CollisionRect(16, 21, 27, 27);
+        terrainButtons = new CollisionRect[TerrainCatalog.Names.Length];
+        tilesets = new Texture2D[TerrainCatalog.Names.Length];
+        for (int i = 0; i < terrainButtons.Length; i++)
+        {
+            terrainButtons[i] = new CollisionRect(16 + i % 2 * 32, 21 + i / 2 * 31, 27, 27);
+            tilesets[i] = Globals.Content.Load<Texture2D>("graphics/tileset/" + TerrainCatalog.Names[i]);
+        }
         SpawnButton = new CollisionRect(16, 21, 27, 27);
         CheckpointButton = new CollisionRect(16, 21, 27, 27);
         ExitButton = new CollisionRect(48, 21, 27, 27);
-        tileset = Globals.Content.Load<Texture2D>("graphics/tileset/basic");
         playerSprite = Globals.Content.Load<Texture2D>("graphics/player/idle");
         checkpointSprite = Globals.Content.Load<Texture2D>("graphics/special_objects/checkpoint");
         exitSprite = Globals.Content.Load<Texture2D>("graphics/special_objects/exit_flag");
@@ -113,7 +119,7 @@ public sealed class EditorMode : GameMode
         var blank = new int[80, 400];
         for (int y = 0; y < 80; y++)
             for (int x = 0; x < 400; x++) blank[y, x] = -1;
-        preview = new AutoTileMap("graphics/tileset/basic", blank);
+        preview = new AutoTileMap(TerrainCatalog.Paths(), blank, new int[80, 400]);
         snapshot = Capture();
         camera = new Camera { Origin = Vector2.Zero };
         RefreshLayout();
@@ -201,6 +207,11 @@ public sealed class EditorMode : GameMode
                         manualSpringDirection = false;
                     }
                     tool = selected;
+                    if (tool == Tool.Terrain)
+                    {
+                        selectedTerrain = TerrainAt(pointer);
+                        showStatus("Terrain: " + TerrainCatalog.Names[selectedTerrain]);
+                    }
                     draggingFromPalette = tool != Tool.Terrain;
                     if (IsSpecialTool()) showStatus($"{SelectedObjectType()}: {bounceDirection} | R: rotate");
                 }
@@ -356,7 +367,9 @@ public sealed class EditorMode : GameMode
     public void LoadLevel(string path)
     {
         var data = LevelData.Load(path);
-        preview = new AutoTileMap("graphics/tileset/basic", data.CreateGrid(false));
+        preview = new AutoTileMap(TerrainCatalog.Paths(), data.CreateGrid(false),
+            data.CreateMaterials(TerrainCatalog.Names));
+        selectedTerrain = 0;
         spawn = data.HasSpawn ? new Point(data.SpawnX, data.SpawnY) : null;
         objects.Clear();
         objects.AddRange(data.Objects);
@@ -611,9 +624,17 @@ public sealed class EditorMode : GameMode
             (valid ? Color.White : new Color(255, 120, 120)) * alpha);
     }
 
+    private int TerrainAt(Point point)
+    {
+        if (palette != Palette.Terrain) return -1;
+        for (int i = 0; i < terrainButtons.Length; i++)
+            if (terrainButtons[i].Contains(point)) return i;
+        return -1;
+    }
+
     private Tool PaletteToolAt(Point point)
     {
-        if (palette == Palette.Terrain && TerrainButton.Contains(point)) return Tool.Terrain;
+        if (TerrainAt(point) >= 0) return Tool.Terrain;
         if (palette == Palette.Sprites && SpawnButton.Contains(point)) return Tool.Spawn;
         if (palette == Palette.Special && CheckpointButton.Contains(point)) return Tool.Checkpoint;
         if (palette == Palette.Special && ExitButton.Contains(point)) return Tool.Exit;
@@ -641,14 +662,19 @@ public sealed class EditorMode : GameMode
             {
                 var slot = new Rectangle(3 + col * 32, 8 + row * 31, 27, 27);
                 Tool item = PaletteToolAt(slot.Center);
-                Color border = item != Tool.None && tool == item ? Color.Yellow
+                bool selected = item != Tool.None && tool == item
+                    && (item != Tool.Terrain || row * 2 + col == selectedTerrain);
+                Color border = selected ? Color.Yellow
                     : item != Tool.None && slot.Contains(pointer) ? Color.White : new Color(194, 195, 199);
                 Fill(slot, border);
                 Fill(new Rectangle(slot.X + 1, slot.Y + 1, slot.Width - 2, slot.Height - 2),
                     new Color(95, 87, 79));
             }
         if (palette == Palette.Terrain)
-            DrawPaletteItem(tileset, new Rectangle(0, 0, 8, 8), TerrainButton.Rect);
+        {
+            for (int i = 0; i < tilesets.Length; i++)
+                DrawPaletteItem(tilesets[i], new Rectangle(0, 0, 8, 8), terrainButtons[i].Rect);
+        }
         else if (palette == Palette.Sprites)
             DrawPaletteItem(playerSprite, new Rectangle(0, 0, 16, 16), SpawnButton.Rect);
         else if (palette == Palette.Special)
@@ -772,7 +798,7 @@ public sealed class EditorMode : GameMode
         int error = dx + dy;
         while (true)
         {
-            preview.Paint(from.X, from.Y, solid);
+            preview.Paint(from.X, from.Y, solid, selectedTerrain);
             if (from == to) { snapshot = Capture(); break; }
             int twice = 2 * error;
             if (twice >= dy) { error += dy; from.X += sx; }

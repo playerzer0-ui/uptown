@@ -36,20 +36,29 @@ public sealed class LevelData
     public int SpawnY { get; set; }
     public bool HasSpawn { get; set; }
     public int[][] Terrain { get; set; }
+    public string[] TerrainTilesets { get; set; }
+    public int[][] TerrainMaterials { get; set; }
     // Older level files have no objects; the empty default keeps them loading.
     public List<LevelObject> Objects { get; set; } = new();
 
     public static LevelData Capture(AutoTileMap map, Point? spawn, IEnumerable<LevelObject> objects = null)
     {
-        var data = new LevelData { Width = map.Width, Height = map.Height };
+        var data = new LevelData { Version = 2, Width = map.Width, Height = map.Height,
+            TerrainTilesets = map.Tilesets == null ? new[] { "basic" } : (string[])map.Tilesets.Clone() };
         if (objects != null)
             foreach (var item in objects) data.Objects.Add(new LevelObject
                 { Type = item.Type, X = item.X, Y = item.Y, Direction = item.Direction });
         data.Terrain = new int[data.Height][];
+        data.TerrainMaterials = new int[data.Height][];
         for (int y = 0; y < data.Height; y++)
         {
             data.Terrain[y] = new int[data.Width];
-            for (int x = 0; x < data.Width; x++) data.Terrain[y][x] = map.Occupied(x, y) ? 1 : 0;
+            data.TerrainMaterials[y] = new int[data.Width];
+            for (int x = 0; x < data.Width; x++)
+            {
+                data.Terrain[y][x] = map.Occupied(x, y) ? 1 : 0;
+                data.TerrainMaterials[y][x] = Math.Max(0, map.MaterialAt(x, y));
+            }
         }
         if (!spawn.HasValue)
         {
@@ -81,6 +90,19 @@ public sealed class LevelData
         return true;
     }
 
+    public int[,] CreateMaterials(string[] targetTilesets)
+    {
+        var sourceTilesets = TerrainTilesets ?? new[] { Tileset ?? "basic" };
+        var grid = new int[Height, Width];
+        for (int y = 0; y < Height; y++)
+            for (int x = 0; x < Width; x++)
+            {
+                int source = TerrainMaterials?[y][x] ?? 0;
+                grid[y, x] = Math.Max(0, Array.IndexOf(targetTilesets, sourceTilesets[source]));
+            }
+        return grid;
+    }
+
     public static string SaveFolder()
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
@@ -96,6 +118,12 @@ public sealed class LevelData
             || data.Terrain.Length != data.Height || Array.Exists(data.Terrain, row => row == null || row.Length != data.Width))
             throw new InvalidDataException("Level file is missing or has mismatched terrain.");
         data.Objects ??= new();
+        var names = data.TerrainTilesets ?? new[] { data.Tileset ?? "basic" };
+        if (names.Length == 0 || Array.Exists(names, string.IsNullOrWhiteSpace)
+            || (data.TerrainMaterials != null && (data.TerrainMaterials.Length != data.Height
+                || Array.Exists(data.TerrainMaterials, row => row == null || row.Length != data.Width
+                    || Array.Exists(row, id => id < 0 || id >= names.Length)))))
+            throw new InvalidDataException("Level file has invalid terrain materials.");
         data.Objects.RemoveAll(item => item == null);
         return data;
     }

@@ -188,6 +188,54 @@
 /processorParam:TextureFormat=Color
 /build:graphics/tileset/collision.png
 
+#begin graphics/tileset/glass.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:graphics/tileset/glass.png;graphics/tileset/glass
+
+#begin graphics/tileset/grass.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:graphics/tileset/grass.png;graphics/tileset/grass
+
+#begin graphics/tileset/ground.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:graphics/tileset/ground.png;graphics/tileset/ground
+
+#begin graphics/tileset/wall.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:graphics/tileset/wall.png;graphics/tileset/wall
+
 #begin graphics/ui/arrow-left.png
 /importer:TextureImporter
 /processor:TextureProcessor
@@ -307,3 +355,4 @@
 /processorParam:MakeSquare=False
 /processorParam:TextureFormat=Color
 /build:graphics/ui/tilebar.png;graphics/ui/tilebar
+

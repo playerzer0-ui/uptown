@@ -34,7 +34,8 @@ public sealed class PlayMode : GameMode
     {
         this.returnToEditor = returnToEditor;
         this.levelCleared = levelCleared;
-        tileMap = new AutoTileMap("graphics/tileset/basic", level.CreateGrid(false));
+        tileMap = new AutoTileMap(TerrainCatalog.Paths(), level.CreateGrid(false),
+            level.CreateMaterials(TerrainCatalog.Names));
         var collisions = new CollisionMap("graphics/tileset/collision", 8, 8,
             level.CreateGrid(true));
         player = new Player(collisions, new Vector2(level.SpawnX, level.SpawnY));
