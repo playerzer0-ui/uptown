@@ -24,6 +24,7 @@ public sealed class PlayMode : GameMode
     private bool levelComplete;
     private bool levelSaved;
     private bool saveAttempted;
+    private bool resetPending;
     private float viewWidth;
     private float viewHeight;
     private int windowWidth;
@@ -62,6 +63,7 @@ public sealed class PlayMode : GameMode
         player = new Player(collisions, new Vector2(level.SpawnX, level.SpawnY), entities.OfType<Platform>().ToList(),
             entities.OfType<MovingPlatform>().ToList());
         collisionMap = collisions;
+        player.Respawned += () => resetPending = true;
         RefreshLayout();
     }
 
@@ -76,8 +78,14 @@ public sealed class PlayMode : GameMode
         tileMap.Update(gameTime);
         // Once the level is complete the player freezes; objects keep animating.
         if (!levelComplete) player.Update(gameTime);
+        if (ResetAfterDeath()) { UpdateCamera(); return; }
         if (!levelComplete)
-            foreach (var platform in entities.OfType<MovingPlatform>()) platform.Advance(gameTime, player, collisionMap);
+            foreach (var platform in entities.OfType<MovingPlatform>())
+            {
+                platform.Advance(gameTime, player, collisionMap);
+                if (resetPending) break;
+            }
+        if (ResetAfterDeath()) { UpdateCamera(); return; }
         entities.Update(gameTime);
         if (levelComplete) return;
         TouchSpecialObjects();
@@ -93,6 +101,15 @@ public sealed class PlayMode : GameMode
         levelCleared = null;
         saveAttempted = onCleared != null;
         levelSaved = onCleared?.Invoke() ?? false;
+    }
+
+    private bool ResetAfterDeath()
+    {
+        if (!resetPending) return false;
+        resetPending = false;
+        foreach (var special in entities.OfType<SpecialObject>()) special.Reset();
+        levelComplete = levelSaved = saveAttempted = false;
+        return true;
     }
 
     public override void Draw()

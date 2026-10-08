@@ -41,6 +41,13 @@ public abstract class BounceObject : SpecialObject
     protected virtual void Launch(Player player) =>
         player.BounceTimed(Direction, BounceSpeed, PerfectBounceSpeed);
 
+    public override void Reset()
+    {
+        base.Reset();
+        animating = false;
+        Sprite.Play("Idle");
+    }
+
     public override void Update(GameTime gameTime)
     {
         if (!animating) return;

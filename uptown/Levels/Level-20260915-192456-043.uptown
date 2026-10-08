@@ -4984,30 +4984,87 @@
       "Type": "spring",
       "X": 144,
       "Y": 256,
+      "WidthTiles": 6,
+      "Waypoints": [],
+      "MoveSpeed": 40,
       "Direction": 0
     },
     {
       "Type": "bounceball",
       "X": 176,
       "Y": 256,
+      "WidthTiles": 6,
+      "Waypoints": [],
+      "MoveSpeed": 40,
       "Direction": 0
     },
     {
       "Type": "checkpoint",
       "X": 104,
       "Y": 264,
+      "WidthTiles": 6,
+      "Waypoints": [],
+      "MoveSpeed": 40,
       "Direction": 0
     },
     {
       "Type": "bounceball",
       "X": 80,
       "Y": 264,
+      "WidthTiles": 6,
+      "Waypoints": [],
+      "MoveSpeed": 40,
       "Direction": 0
     },
     {
       "Type": "exit",
       "X": 256,
       "Y": 248,
+      "WidthTiles": 6,
+      "Waypoints": [],
+      "MoveSpeed": 40,
+      "Direction": 0
+    },
+    {
+      "Type": "movingplatform",
+      "X": 68,
+      "Y": 216,
+      "WidthTiles": 5,
+      "Waypoints": [
+        {
+          "X": 116,
+          "Y": 216
+        },
+        {
+          "X": 116,
+          "Y": 160
+        },
+        {
+          "X": 172,
+          "Y": 160
+        },
+        {
+          "X": 172,
+          "Y": 216
+        },
+        {
+          "X": 220,
+          "Y": 216
+        },
+        {
+          "X": 220,
+          "Y": 248
+        },
+        {
+          "X": 276,
+          "Y": 248
+        },
+        {
+          "X": 276,
+          "Y": 240
+        }
+      ],
+      "MoveSpeed": 40,
       "Direction": 0
     }
   ]

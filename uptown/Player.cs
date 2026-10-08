@@ -62,6 +62,8 @@ public class Player
     public bool IsWallSliding { get; private set; }
     public bool IsCrouching { get; private set; }
     public CollisionRect Collider { get; }
+    public event Action Respawned;
+    public int RespawnCount { get; private set; }
 
     public Player(CollisionMap map, Vector2 spawn, List<Platform> platforms = null, List<MovingPlatform> movingPlatforms = null)
     {
@@ -88,7 +90,7 @@ public class Player
     {
         float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
         var input = Globals.Input;
-        if (input.JustPressed("Respawn")) Respawn();
+        if (input.JustPressed("Respawn")) { Respawn(); return; }
         bool jumpPressed = input.JustPressed("Jump");
         recentJumpPress = jumpPressed ? PerfectBounceWindow : Math.Max(0, recentJumpPress - dt);
         bounceBoostWindow = Math.Max(0, bounceBoostWindow - dt);
@@ -244,7 +246,7 @@ public class Player
             // between landing and jumping. A held button alone never repeats.
             if (jumpBuffer > 0 && TryStand()) BeginJump();
         }
-        if (Position.Y > map.Height * map.TileSizeY + 32) Respawn();
+        if (Position.Y > map.Height * map.TileSizeY + 32) { Respawn(); return; }
         IsWallSliding = CanWallSlide(moveX);
 
         // Input and wall contact remain stable even when collision resolution
@@ -357,7 +359,17 @@ public class Player
         // hitbox, but exclude the lowest 3px to reject foot-only contact.
         for (int y = Collider.Rect.Top + 3; y < Collider.Rect.Bottom - 3; y++)
             if (map.IsSolidAt(x, y)) return true;
+        var probe = new Rectangle(x, Collider.Rect.Top + 3, 1, Math.Max(1, Collider.Rect.Height - 6));
+        foreach (var platform in movingPlatforms)
+            if (platform.Collider.Rect.Intersects(probe)) return true;
         return false;
+    }
+
+    public bool Grabs(Rectangle platform)
+    {
+        if (!IsClimbing) return false;
+        int x = facing > 0 ? Collider.Rect.Right : Collider.Rect.Left - 1;
+        return platform.Intersects(new Rectangle(x, Collider.Rect.Top + 3, 1, Math.Max(1, Collider.Rect.Height - 6)));
     }
 
     private void Move(float distance, bool horizontal)
@@ -399,6 +411,10 @@ public class Player
         airJumpAvailable = true;
         IsClimbing = false;
         IsWallSliding = false;
+        IsGrounded = false;
+        animation?.Reset();
+        RespawnCount++;
+        Respawned?.Invoke();
     }
 
     private static float Approach(float value, float target, float amount) =>

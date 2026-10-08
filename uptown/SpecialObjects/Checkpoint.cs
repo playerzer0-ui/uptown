@@ -24,6 +24,13 @@ public sealed class Checkpoint : SpecialObject
 
     public override void Update(GameTime gameTime) => sprite.Update(gameTime);
 
+    public override void Reset()
+    {
+        base.Reset();
+        sprite.Reset();
+        // Keep the active checkpoint and player spawn across deaths.
+    }
+
     public override void Draw()
     {
         var bounds = ObjectRotation.Bounds(Position.ToPoint(), LevelObject.Checkpoint, direction);

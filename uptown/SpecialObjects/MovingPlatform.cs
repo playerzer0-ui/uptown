@@ -25,6 +25,14 @@ public sealed class MovingPlatform : SpecialObject
         new(feet.X - Math.Max(3, widthTiles) * 4, feet.Y - Height, Math.Max(3, widthTiles) * 8, Height);
     public override bool Touches(Player player) => false;
 
+    public override void Reset()
+    {
+        base.Reset();
+        path.IsReversed = false;
+        path.IsActive = true;
+        path.Reset();
+    }
+
     public static List<Vector2> Route(LevelObject data)
     {
         var points = new List<Vector2> { new(data.X, data.Y) };
@@ -68,11 +76,12 @@ public sealed class MovingPlatform : SpecialObject
 
     private bool Step(int dx, int dy, Player player, CollisionMap terrain)
     {
+        int respawns = player.RespawnCount;
         Rectangle before = Collider.Rect;
         Rectangle next = before;
         next.Offset(dx, dy);
         if (terrain.CheckCollision(next)) { path.IsActive = false; return false; }
-        bool rider = player.Rides(before);
+        bool rider = player.Rides(before) || player.Grabs(before);
         Position += new Vector2(dx, dy);
         Collider.Translate(dx, dy);
         if (rider) player.Transport(this, dx, dy);
@@ -83,7 +92,7 @@ public sealed class MovingPlatform : SpecialObject
             int pushY = dy > 0 ? next.Bottom - actor.Top : dy < 0 ? next.Top - actor.Bottom : 0;
             player.Transport(this, pushX, pushY);
         }
-        return true;
+        return player.RespawnCount == respawns;
     }
 
     public override void Draw()

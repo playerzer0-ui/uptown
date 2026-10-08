@@ -23,6 +23,13 @@ public sealed class ExitFlag : SpecialObject
 
     public override void Update(GameTime gameTime) => sprite.Update(gameTime);
 
+    public override void Reset()
+    {
+        base.Reset();
+        Reached = false;
+        sprite.Reset();
+    }
+
     public override void Draw()
     {
         var bounds = ObjectRotation.Bounds(Position.ToPoint(), LevelObject.ExitFlag, direction);

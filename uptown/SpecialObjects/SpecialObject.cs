@@ -11,11 +11,13 @@ namespace uptown.SpecialObjects;
 /// </summary>
 public abstract class SpecialObject : Entity
 {
+    private readonly Vector2 initialPosition;
     /// <summary>True while the player's hitbox overlaps this object's collider.</summary>
     public bool PlayerInside { get; internal set; }
 
     protected SpecialObject(Vector2 feet, int width, int height) : base(feet)
     {
+        initialPosition = feet;
         // CollisionRect takes a center, so lift it by half the height.
         if (width > 0 && height > 0)
             Collider = new CollisionRect((int)feet.X, (int)feet.Y - height / 2, width, height);
@@ -38,4 +40,13 @@ public abstract class SpecialObject : Entity
 
     /// <summary>The first frame the player stops touching this object.</summary>
     public virtual void OnPlayerExit(Player player) { }
+
+    public virtual void Reset()
+    {
+        Vector2 delta = initialPosition - Position;
+        Collider?.Translate((int)delta.X, (int)delta.Y);
+        Position = initialPosition;
+        PlayerInside = false;
+        Active = Visible = true;
+    }
 }
