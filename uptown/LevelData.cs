@@ -17,10 +17,12 @@ public sealed class LevelObject
     public const string ExitFlag = "exit";
     public const string BounceBall = "bounceball";
     public const string Spring = "spring";
+    public const string Platform = "platform";
 
     public string Type { get; set; }
     public int X { get; set; }
     public int Y { get; set; }
+    public int WidthTiles { get; set; } = 6;
     public BounceDirection Direction { get; set; } = BounceDirection.Up;
 }
 
@@ -47,7 +49,7 @@ public sealed class LevelData
             TerrainTilesets = map.Tilesets == null ? new[] { "basic" } : (string[])map.Tilesets.Clone() };
         if (objects != null)
             foreach (var item in objects) data.Objects.Add(new LevelObject
-                { Type = item.Type, X = item.X, Y = item.Y, Direction = item.Direction });
+                { Type = item.Type, X = item.X, Y = item.Y, Direction = item.Direction, WidthTiles = item.WidthTiles });
         data.Terrain = new int[data.Height][];
         data.TerrainMaterials = new int[data.Height][];
         for (int y = 0; y < data.Height; y++)

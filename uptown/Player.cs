@@ -1,4 +1,6 @@
-﻿using System;
+using System;
+using System.Collections.Generic;
+using uptown.SpecialObjects;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
@@ -15,9 +17,13 @@ public class Player
     private const float AirControl = 0.65f;
     private const float JumpHoldDuration = 0.16f;
     private const float JumpBufferDuration = 0.1f;
+    private const float PerfectBounceWindow = 0.1f;
     private const float WallSlideSpeed = 30f;
     private const float WallJumpSpeed = 110f;
     private readonly CollisionMap map;
+    private readonly List<Platform> platforms;
+    private readonly HashSet<int> ignoredPlatformTops = new();
+    private float platformCrouchTime;
     // Where the player reappears after dying; checkpoints move it.
     public Vector2 Spawn { get; set; }
     private readonly SpriteAnimation idle = new("graphics/player/idle", 2, 4);
@@ -39,6 +45,12 @@ public class Player
     private float climbHopTargetX;
     private float jumpBuffer;
     private float jumpHoldTime;
+    // Independent of jumpBuffer: an ordinary jump may consume that buffer
+    // before PlayMode detects launcher contact later in the same frame.
+    private float recentJumpPress;
+    private float bounceBoostWindow;
+    private float bounceBoostSpeed;
+    private BounceDirection bounceBoostDirection;
     private Vector2 visualStretch = Vector2.One;
 
     // Position is the bottom-center of the player, matching the sprite's feet.
@@ -49,9 +61,10 @@ public class Player
     public bool IsCrouching { get; private set; }
     public CollisionRect Collider { get; }
 
-    public Player(CollisionMap map, Vector2 spawn)
+    public Player(CollisionMap map, Vector2 spawn, List<Platform> platforms = null)
     {
         this.map = map;
+        this.platforms = platforms ?? new List<Platform>();
         Spawn = spawn;
         Position = spawn;
         Collider = new CollisionRect((int)spawn.X, (int)spawn.Y - 6, 8, 12);
@@ -73,7 +86,12 @@ public class Player
         float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
         var input = Globals.Input;
         if (input.JustPressed("Respawn")) Respawn();
-        jumpBuffer = input.JustPressed("Jump") ? JumpBufferDuration : Math.Max(0, jumpBuffer - dt);
+        bool jumpPressed = input.JustPressed("Jump");
+        recentJumpPress = jumpPressed ? PerfectBounceWindow : Math.Max(0, recentJumpPress - dt);
+        bounceBoostWindow = Math.Max(0, bounceBoostWindow - dt);
+        jumpBuffer = jumpPressed ? JumpBufferDuration : Math.Max(0, jumpBuffer - dt);
+        if (jumpPressed && bounceBoostWindow > 0)
+            Bounce(bounceBoostDirection, bounceBoostSpeed);
         jumpHoldTime = Math.Max(0, jumpHoldTime - dt);
         visualStretch = Vector2.Lerp(visualStretch, Vector2.One, 1f - MathF.Exp(-18f * dt));
         int moveX = (input.IsPressed("Right") || input.KeyDown(Keys.Right) ? 1 : 0)
@@ -86,11 +104,23 @@ public class Player
         if (moveY == 0 && Math.Abs(input.LeftStick.Y) > stickDeadzone)
             moveY = -Math.Sign(input.LeftStick.Y);
 
+        ignoredPlatformTops.RemoveWhere(top => Collider.Rect.Top > top);
         IsGrounded = velocity.Y >= 0 && SolidAt(0, 1);
         if (IsGrounded && moveY > 0 && !IsClimbing)
             SetCrouching(true);
         else if (IsCrouching)
             TryStand();
+        Platform support = SupportingPlatform();
+        platformCrouchTime = IsGrounded && IsCrouching && moveY > 0 && support != null
+            ? platformCrouchTime + dt : 0;
+        if (platformCrouchTime >= 0.3f)
+        {
+            ignoredPlatformTops.Add(support.Collider.Rect.Top);
+            platformCrouchTime = 0;
+            IsGrounded = false;
+            coyoteTime = jumpBuffer = jumpHoldTime = 0;
+            velocity.Y = Math.Max(velocity.Y, 30f);
+        }
         coyoteTime = IsGrounded ? 0.1f : Math.Max(0, coyoteTime - dt);
         if (IsGrounded) airJumpAvailable = true;
         wallJumpTime = Math.Max(0, wallJumpTime - dt);
@@ -251,6 +281,7 @@ public class Player
 
     public void Bounce(BounceDirection direction, float speed)
     {
+        recentJumpPress = bounceBoostWindow = 0;
         TryStand();
         velocity = uptown.SpecialObjects.ObjectRotation.Vector(direction) * speed;
         remainder = Vector2.Zero;
@@ -264,24 +295,54 @@ public class Player
         jump.Reset();
     }
 
+    public void BounceTimed(BounceDirection direction, float speed, float perfectSpeed)
+    {
+        bool perfect = recentJumpPress > 0;
+        Bounce(direction, perfect ? perfectSpeed : speed);
+        if (!perfect)
+        {
+            // A fresh press shortly after contact upgrades this launch once.
+            bounceBoostDirection = direction;
+            bounceBoostSpeed = perfectSpeed;
+            bounceBoostWindow = PerfectBounceWindow;
+        }
+    }
+
     private bool CanWallSlide(int moveX) =>
         !IsGrounded && !IsClimbing && !IsCrouching && !isClimbHopping && wallJumpTime == 0
         && velocity.Y > 0 && moveX != 0 && CanGrabWall(moveX);
 
     private bool SolidAt(int dx, int dy)
     {
+        Rectangle before = Collider.Rect;
         // Probe with the existing collider, then restore it without allocating another.
         Collider.Translate(dx, dy);
         try
         {
             if (Collider.Rect.Left < 0 || Collider.Rect.Right > map.Width * map.TileSizeX)
                 return true;
-            return map.CheckCollision(Collider);
+            if (map.CheckCollision(Collider)) return true;
+            if (dx == 0 && dy > 0)
+                foreach (var platform in platforms)
+                    if (!ignoredPlatformTops.Contains(platform.Collider.Rect.Top)
+                        && Platform.BlocksDownward(before, Collider.Rect, platform.Collider.Rect)) return true;
+            return false;
         }
         finally
         {
             Collider.Translate(-dx, -dy);
         }
+    }
+
+    private Platform SupportingPlatform()
+    {
+        foreach (var platform in platforms)
+        {
+            Rectangle bounds = platform.Collider.Rect;
+            if (!ignoredPlatformTops.Contains(bounds.Top) && Collider.Rect.Bottom == bounds.Top
+                && Collider.Rect.Right > bounds.Left && Collider.Rect.Left < bounds.Right) return platform;
+        }
+        return null;
     }
 
     private bool CanGrabWall(int direction)
@@ -306,6 +367,7 @@ public class Player
         {
             if (SolidAt(horizontal ? step : 0, horizontal ? 0 : step))
             {
+                bounceBoostWindow = 0;
                 if (horizontal) { velocity.X = 0; remainder.X = 0; }
                 else { velocity.Y = 0; remainder.Y = 0; jumpHoldTime = 0; }
                 break;
@@ -318,6 +380,9 @@ public class Player
 
     private void Respawn()
     {
+        ignoredPlatformTops.Clear();
+        platformCrouchTime = 0;
+        recentJumpPress = bounceBoostWindow = 0;
         Position = Spawn;
         SetCrouching(false);
         velocity = remainder = Vector2.Zero;

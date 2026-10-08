@@ -38,10 +38,11 @@ public sealed class PlayMode : GameMode
             level.CreateMaterials(TerrainCatalog.Names));
         var collisions = new CollisionMap("graphics/tileset/collision", 8, 8,
             level.CreateGrid(true));
-        player = new Player(collisions, new Vector2(level.SpawnX, level.SpawnY));
         camera = new Camera();
         font = Globals.Content.Load<SpriteFont>("File");
         stopIcon = Globals.Content.Load<Texture2D>("graphics/ui/stop");
+        PlatformLayout.Rebuild(level.Objects, PlatformLayout.Cells(level.Objects), level.Width, level.Height,
+            (x, y) => x >= 0 && y >= 0 && x < level.Width && y < level.Height && level.Terrain[y][x] == 1);
         foreach (var item in level.Objects)
         {
             var feet = new Vector2(item.X, item.Y);
@@ -49,7 +50,15 @@ public sealed class PlayMode : GameMode
             else if (item.Type == LevelObject.ExitFlag) entities.Add(new ExitFlag(feet, item.Direction));
             else if (item.Type == LevelObject.BounceBall) entities.Add(new BounceBall(feet, item.Direction));
             else if (item.Type == LevelObject.Spring) entities.Add(new Spring(feet, item.Direction));
+            else if (item.Type == LevelObject.Platform)
+            {
+                var bounds = Platform.Bounds(new Point(item.X, item.Y), item.WidthTiles);
+                entities.Add(new Platform(feet, item.WidthTiles,
+                    tileMap.Occupied(bounds.Left / 8 - 1, bounds.Top / 8),
+                    tileMap.Occupied(bounds.Right / 8, bounds.Top / 8)));
+            }
         }
+        player = new Player(collisions, new Vector2(level.SpawnX, level.SpawnY), entities.OfType<Platform>().ToList());
         RefreshLayout();
     }
 
