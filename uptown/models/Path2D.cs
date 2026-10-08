@@ -56,7 +56,7 @@ namespace NodeTesting.models
         /// <param name="speed">Movement speed in pixels per second.</param>
         public Path2D(List<Vector2> waypoints, float speed = 100f)
         {
-            this.speed = speed;
+            Speed = speed;
             foreach (var wp in waypoints)
                 AddWaypoint(wp, 0f);
 
@@ -146,55 +146,39 @@ namespace NodeTesting.models
             if (!IsActive || IsFinished || waypoints.Count < 2)
                 return;
 
-            float delta = (float)gameTime.ElapsedGameTime.TotalSeconds;
-
-            // ── Handle waypoint delay ──────────────────────────────────────────
-            if (isWaiting)
+            float remaining = (float)gameTime.ElapsedGameTime.TotalSeconds;
+            int transitions = 0;
+            while (remaining > 0 && !IsFinished && transitions < 4096)
             {
-                delayTimer -= delta;
-                if (delayTimer > 0f)
-                    return;
-
-                isWaiting = false;
-                delayTimer = 0f;
-                AdvanceIndex();
-
-                if (IsFinished)
-                    return;
-            }
-
-            // ── Move toward the current target waypoint ────────────────────────
-            Vector2 target = waypoints[currentIndex];
-            Vector2 direction = target - Position;
-            float distanceToTarget = direction.Length();
-            float distanceThisFrame = speed * delta;
-
-            if (distanceThisFrame >= distanceToTarget)
-            {
-                // Arrived at waypoint
-                Position = target;
-
-                float delay = waypointDelays[currentIndex];
-                if (delay > 0f)
+                if (isWaiting)
                 {
-                    // Pause here before moving on
-                    isWaiting = true;
-                    delayTimer = delay;
-                }
-                else
-                {
+                    float waited = System.Math.Min(remaining, delayTimer);
+                    remaining -= waited;
+                    delayTimer -= waited;
+                    if (delayTimer > 0) return;
+                    isWaiting = false;
                     AdvanceIndex();
+                    transitions++;
+                    continue;
                 }
-            }
-            else
-            {
-                // Still travelling
-                direction.Normalize();
-                Position += direction * distanceThisFrame;
+                Vector2 target = waypoints[currentIndex];
+                Vector2 delta = target - Position;
+                float distance = delta.Length();
+                if (distance > 0 && speed <= 0) return;
+                float travelTime = distance > 0 ? distance / speed : 0;
+                if (travelTime > remaining)
+                {
+                    Position += delta / distance * speed * remaining;
+                    return;
+                }
+                Position = target;
+                remaining -= travelTime;
+                float delay = waypointDelays[currentIndex];
+                if (delay > 0) { isWaiting = true; delayTimer = delay; }
+                else AdvanceIndex();
+                transitions++;
             }
         }
-
-        // ── Private helpers ────────────────────────────────────────────────────
 
         /// <summary>
         /// Moves currentIndex to the next waypoint, handling looping, ping-pong, and end-of-path.

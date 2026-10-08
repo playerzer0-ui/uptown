@@ -23,7 +23,7 @@ public sealed class EditorMode : GameMode
         PlatformLayout.Rebuild(objects, PlatformLayout.Cells(objects), preview.Width, preview.Height, preview.Occupied);
         return LevelData.Capture(preview, spawn, objects);
     }
-    private enum Tool { None, Terrain, Spawn, Checkpoint, Exit, BounceBall, Spring, Platform }
+    private enum Tool { None, Terrain, Spawn, Checkpoint, Exit, BounceBall, Spring, Platform, MovingPlatform }
     private enum Palette { Terrain, Special, Sprites, Background }
     private Palette palette;
     private readonly Texture2D[] bars;
@@ -36,6 +36,16 @@ public sealed class EditorMode : GameMode
     private readonly CollisionRect BounceBallButton = new(16, 52, 27, 27);
     private readonly CollisionRect SpringButton = new(48, 52, 27, 27);
     private readonly CollisionRect PlatformButton = new(16, 83, 27, 27);
+    private readonly CollisionRect MovingPlatformButton = new(48, 83, 27, 27);
+    private LevelObject pathDraft;
+    private LevelObject pathOriginal;
+    private LevelObject resizingPlatform;
+    private int resizeStartWidth;
+    private float resizeStartDistance;
+    private Point? pathCursor;
+    private bool pathCursorValid;
+    private float pathClickAge = float.PositiveInfinity;
+    private Vector2 pathClickPosition;
     private BounceDirection bounceDirection;
     private BounceDirection ghostDirection;
     private bool manualSpringDirection;
@@ -69,6 +79,7 @@ public sealed class EditorMode : GameMode
     private readonly Texture2D bounceBallSprite;
     private readonly Texture2D springSprite;
     private readonly Texture2D platformSprite;
+    private readonly Texture2D movingPlatformSprite;
     private readonly Texture2D pixel;
     private readonly Camera camera;
     private bool isPanning;
@@ -121,6 +132,7 @@ public sealed class EditorMode : GameMode
         bounceBallSprite = Globals.Content.Load<Texture2D>("graphics/special_objects/bounceball");
         springSprite = Globals.Content.Load<Texture2D>("graphics/special_objects/spring");
         platformSprite = Globals.Content.Load<Texture2D>("graphics/special_objects/platform");
+        movingPlatformSprite = Globals.Content.Load<Texture2D>("graphics/special_objects/moving_platform");
         pixel = new Texture2D(Globals.graphics.GraphicsDevice, 1, 1);
         pixel.SetData(new[] { Color.White });
         var blank = new int[80, 400];
@@ -150,6 +162,7 @@ public sealed class EditorMode : GameMode
 
     public override void Update(GameTime gameTime)
     {
+        pathClickAge += (float)gameTime.ElapsedGameTime.TotalSeconds;
         preview.Update(gameTime);
         bool control = Globals.Input.KeyDown(Keys.LeftControl) || Globals.Input.KeyDown(Keys.RightControl);
         if (control && Globals.Input.KeyJustDown(Keys.S)) { SaveLevel(); return; }
@@ -219,13 +232,19 @@ public sealed class EditorMode : GameMode
                         selectedTerrain = TerrainAt(pointer);
                         showStatus("Terrain: " + TerrainCatalog.Names[selectedTerrain]);
                     }
-                    draggingFromPalette = tool != Tool.Terrain && tool != Tool.Platform;
+                    draggingFromPalette = tool != Tool.Terrain && tool != Tool.Platform && tool != Tool.MovingPlatform;
                     if (IsSpecialTool()) showStatus(tool == Tool.Platform
                         ? "Platform | Drag to paint horizontally from terrain | Right-drag: erase"
+                        : tool == Tool.MovingPlatform ? "Moving platform | Click start and waypoints | Double-click: finish | Drag ends: resize | Right-click: undo"
                         : $"{SelectedObjectType()}: {bounceDirection} | R: rotate");
                 }
             }
             return;
+        }
+        if (tool == Tool.MovingPlatform)
+        {
+            EditMovingPath(position, overLevel, clicked, rightClicked);
+            if (overLevel) { lastPaintCell = null; return; }
         }
         if (Globals.Input.KeyJustDown(Keys.R)) RotateObject(position, overLevel);
         if (overLevel && Globals.Input.KeyDown(Keys.P))
@@ -323,7 +342,11 @@ public sealed class EditorMode : GameMode
             ToggleButton.UpdateRect((sidebarOpen ? SidebarWidth : 0) + 6, viewHeight / 2);
         }
         else if (SaveButton.Contains(pointer)) SaveLevel();
-        else if (PlayButton.Contains(pointer)) switchMode(ModeId.Play);
+        else if (PlayButton.Contains(pointer))
+        {
+            if (pathDraft != null) showStatus("Double-click the final waypoint to finish the route first.");
+            else switchMode(ModeId.Play);
+        }
         else if (HomeButton.Contains(pointer)) switchMode(ModeId.Home);
     }
 
@@ -344,9 +367,20 @@ public sealed class EditorMode : GameMode
         foreach (var item in objects)
         {
             // The picked-up checkpoint, or the exit being moved, fades while its ghost is dragged.
-            bool dragged = ghost.HasValue && (item == moving || (tool == Tool.Exit && item.Type == LevelObject.ExitFlag));
+            bool dragged = item == pathOriginal || ghost.HasValue && (item == moving || (tool == Tool.Exit && item.Type == LevelObject.ExitFlag));
             DrawObject(item.Type, new Point(item.X, item.Y), ObjectFits(new Point(item.X, item.Y), item.Type, item, item.Direction),
                 dragged ? 0.35f : 1f, item.Direction, item.WidthTiles);
+            if (item.Type == LevelObject.MovingPlatform)
+                MovingPlatform.DrawRoute(MovingPlatform.Route(item), Color.White * (dragged ? 0.35f : 1f));
+        }
+        if (pathDraft != null)
+        {
+            DrawObject(LevelObject.MovingPlatform, new Point(pathDraft.X, pathDraft.Y), true, 0.8f, widthTiles: pathDraft.WidthTiles);
+            var route = MovingPlatform.Route(pathDraft);
+            MovingPlatform.DrawRoute(route, Color.White);
+            if (pathCursor.HasValue)
+                MovingPlatform.DrawRoute(new List<Vector2> { route[^1], pathCursor.Value.ToVector2() },
+                    pathCursorValid ? Color.White * 0.6f : Color.Red);
         }
         if (snapshot.HasSpawn)
             DrawPlayer(new Point(snapshot.SpawnX, snapshot.SpawnY), snapshot.ValidSpawn(),
@@ -404,6 +438,7 @@ public sealed class EditorMode : GameMode
 
     public void SaveLevel()
     {
+        if (pathDraft != null) { showStatus("Double-click the final waypoint to finish the route first."); return; }
         var data = Capture();
         if (!data.Objects.Exists(item => item.Type == LevelObject.ExitFlag))
         {
@@ -463,6 +498,9 @@ public sealed class EditorMode : GameMode
 
     private void CancelDrag()
     {
+        pathClickAge = float.PositiveInfinity;
+        pathDraft = pathOriginal = resizingPlatform = null;
+        pathCursor = null;
         ghost = null;
         moving = null;
         draggingFromPalette = false;
@@ -495,7 +533,153 @@ public sealed class EditorMode : GameMode
     }
 
     private static Rectangle ObjectBounds(Point feet, string type, BounceDirection direction, int widthTiles, bool collision = false) =>
-        type == LevelObject.Platform ? Platform.Bounds(feet, widthTiles) : ObjectRotation.Bounds(feet, type, direction, collision);
+        type == LevelObject.Platform ? Platform.Bounds(feet, widthTiles)
+            : type == LevelObject.MovingPlatform ? MovingPlatform.Bounds(feet, widthTiles)
+            : ObjectRotation.Bounds(feet, type, direction, collision);
+
+    private bool MovingPointFits(Point feet, LevelObject ignore, int widthTiles = 3)
+    {
+        var bounds = MovingPlatform.Bounds(feet, widthTiles);
+        if (bounds.Left < 0 || bounds.Top < 0 || bounds.Right > preview.Width * 8 || bounds.Bottom > preview.Height * 8) return false;
+        for (int y = bounds.Top / 8; y <= (bounds.Bottom - 1) / 8; y++)
+            for (int x = bounds.Left / 8; x <= (bounds.Right - 1) / 8; x++)
+                if (preview.Occupied(x, y)) return false;
+        foreach (var item in objects)
+            if (item != ignore && item.Type == LevelObject.Platform
+                && Platform.Bounds(new Point(item.X, item.Y), item.WidthTiles).Intersects(bounds)) return false;
+        return true;
+    }
+
+    private bool MovingSegmentFits(Point from, Point to, LevelObject ignore, int widthTiles = 3)
+    {
+        int dx = to.X - from.X, dy = to.Y - from.Y;
+        if (dx != 0 && dy != 0 && Math.Abs(dx) != Math.Abs(dy)) return false;
+        int steps = Math.Max(Math.Abs(dx), Math.Abs(dy));
+        for (int i = 0; i <= steps; i++)
+        {
+            var point = new Point(from.X + Math.Sign(dx) * i, from.Y + Math.Sign(dy) * i);
+            if (!MovingPointFits(point, ignore, widthTiles)) return false;
+            if (i > 0 && dx != 0 && dy != 0
+                && !MovingPointFits(new Point(point.X, point.Y - Math.Sign(dy)), ignore, widthTiles)) return false;
+        }
+        return true;
+    }
+
+    private bool MovingRouteFits(LevelObject item)
+    {
+        var route = MovingPlatform.Route(item);
+        if (route.Count < 2 || !float.IsFinite(item.MoveSpeed) || item.MoveSpeed <= 0 || item.MoveSpeed > 240) return false;
+        for (int i = 1; i < route.Count; i++)
+            if (!MovingSegmentFits(route[i - 1].ToPoint(), route[i].ToPoint(), item, item.WidthTiles)) return false;
+        return true;
+    }
+
+    private bool ResizeMovingPlatform(Vector2 screen, bool overLevel, bool clicked)
+    {
+        Vector2 world = Vector2.Transform(screen, Matrix.Invert(WorldTransform()));
+        if (resizingPlatform == null && clicked && overLevel)
+        {
+            var candidates = pathDraft != null ? new List<LevelObject> { pathDraft } : objects;
+            foreach (var item in candidates)
+            {
+                if (item.Type != LevelObject.MovingPlatform) continue;
+                var bounds = MovingPlatform.Bounds(new Point(item.X, item.Y), item.WidthTiles);
+                if (world.Y < bounds.Top - 2 || world.Y > bounds.Bottom + 2) continue;
+                if (Math.Abs(world.X - bounds.Left) <= 3 || Math.Abs(world.X - bounds.Right) <= 3)
+                {
+                    resizingPlatform = item;
+                    resizeStartWidth = item.WidthTiles;
+                    resizeStartDistance = Math.Abs(world.X - item.X);
+                    pathClickAge = float.PositiveInfinity;
+                    break;
+                }
+            }
+        }
+        if (resizingPlatform == null) return false;
+        if (Mouse.GetState().LeftButton == ButtonState.Released)
+        {
+            if (resizingPlatform != pathDraft) snapshot = Capture();
+            resizingPlatform = null;
+            return true;
+        }
+        if (!overLevel) return true;
+        int previousWidth = resizingPlatform.WidthTiles;
+        int width = Math.Clamp(resizeStartWidth + (int)MathF.Round(
+            (Math.Abs(world.X - resizingPlatform.X) - resizeStartDistance) / 4), 3, Math.Max(3, preview.Width));
+        resizingPlatform.WidthTiles = width;
+        bool fits = resizingPlatform.Waypoints.Count == 0
+            ? MovingPointFits(new Point(resizingPlatform.X, resizingPlatform.Y), resizingPlatform, width)
+            : MovingRouteFits(resizingPlatform);
+        if (!fits)
+        {
+            resizingPlatform.WidthTiles = previousWidth;
+            showStatus("Platform length blocked along its route.");
+        }
+        else showStatus($"Moving platform: {width} tiles | Drag either end to resize | Double-click final waypoint to finish");
+        return true;
+    }
+
+    private void EditMovingPath(Vector2 screen, bool overLevel, bool clicked, bool rightClicked)
+    {
+        pathCursor = null;
+        if (ResizeMovingPlatform(screen, overLevel, clicked)) return;
+        bool doubleClicked = clicked && overLevel && pathClickAge <= 0.35f
+            && Vector2.DistanceSquared(screen, pathClickPosition) <= 36f;
+        if (pathDraft != null && (doubleClicked || Globals.Input.KeyJustDown(Keys.Enter)))
+        {
+            if (!MovingRouteFits(pathDraft)) { showStatus("Route needs at least two points and clear space along every segment."); return; }
+            if (pathOriginal != null) objects.Remove(pathOriginal);
+            objects.Add(pathDraft);
+            pathDraft = pathOriginal = null;
+            pathClickAge = float.PositiveInfinity;
+            snapshot = Capture();
+            showStatus("Moving platform route finished | Click a platform to edit its route.");
+            return;
+        }
+        if (pathDraft != null && (rightClicked || Globals.Input.KeyJustDown(Keys.Back)))
+        {
+            pathClickAge = float.PositiveInfinity;
+            if (pathDraft.Waypoints.Count > 0) pathDraft.Waypoints.RemoveAt(pathDraft.Waypoints.Count - 1);
+            else { pathDraft = pathOriginal = null; }
+            return;
+        }
+        if (!overLevel) return;
+        Point feet = SpawnCellAt(screen);
+        if (pathDraft == null)
+        {
+            if (rightClicked)
+            {
+                var target = ObjectUnder(screen, LevelObject.MovingPlatform);
+                if (target != null) { objects.Remove(target); snapshot = Capture(); }
+                return;
+            }
+            if (!clicked) return;
+            var existing = ObjectUnder(screen, LevelObject.MovingPlatform);
+            if (existing != null)
+            {
+                pathOriginal = existing;
+                pathDraft = new LevelObject { Type = existing.Type, X = existing.X, Y = existing.Y,
+                    WidthTiles = existing.WidthTiles, MoveSpeed = existing.MoveSpeed,
+                    Waypoints = existing.Waypoints?.ConvertAll(p => new LevelWaypoint { X = p.X, Y = p.Y }) ?? new() };
+            }
+            else if (MovingPointFits(feet, null))
+                pathDraft = new LevelObject { Type = LevelObject.MovingPlatform, X = feet.X, Y = feet.Y, WidthTiles = 3 };
+            else showStatus("Moving platform needs clear space inside the level.");
+            return;
+        }
+        var points = MovingPlatform.Route(pathDraft);
+        Point last = points[^1].ToPoint();
+        feet = MovingPlatform.SnapWaypoint(last, feet);
+        pathCursor = feet;
+        pathCursorValid = feet != last && MovingSegmentFits(last, feet, pathOriginal, pathDraft.WidthTiles);
+        if (clicked && pathCursorValid)
+        {
+            pathDraft.Waypoints.Add(new LevelWaypoint { X = feet.X, Y = feet.Y });
+            pathClickAge = 0;
+            pathClickPosition = screen;
+        }
+        else if (clicked) showStatus("Path segment blocked: use a clear horizontal, vertical or diagonal route.");
+    }
 
     private void PaintPlatformStroke(Point from, Point to, bool solid)
     {
@@ -525,11 +709,12 @@ public sealed class EditorMode : GameMode
         Tool.BounceBall => LevelObject.BounceBall,
         Tool.Spring => LevelObject.Spring,
         Tool.Platform => LevelObject.Platform,
+        Tool.MovingPlatform => LevelObject.MovingPlatform,
         Tool.Exit => LevelObject.ExitFlag,
         _ => LevelObject.Checkpoint
     };
 
-    private bool IsSpecialTool() => tool is Tool.Checkpoint or Tool.Exit or Tool.BounceBall or Tool.Spring or Tool.Platform;
+    private bool IsSpecialTool() => tool is Tool.Checkpoint or Tool.Exit or Tool.BounceBall or Tool.Spring or Tool.Platform or Tool.MovingPlatform;
 
     private void RotateObject(Vector2 screen, bool overLevel)
     {
@@ -542,7 +727,7 @@ public sealed class EditorMode : GameMode
                 var item = objects[i];
                 var feet = new Point(item.X, item.Y);
                 if (!ObjectBounds(feet, item.Type, item.Direction, item.WidthTiles).Contains(world)) continue;
-                if (item.Type == LevelObject.Platform) return;
+                if (item.Type is LevelObject.Platform or LevelObject.MovingPlatform) return;
                 var next = ObjectRotation.Next(item.Type, item.Direction);
                 if (!ObjectFits(feet, item.Type, item, next))
                 {
@@ -555,7 +740,7 @@ public sealed class EditorMode : GameMode
                 return;
             }
         }
-        if (!IsSpecialTool() || tool == Tool.Platform) return;
+        if (!IsSpecialTool() || tool is Tool.Platform or Tool.MovingPlatform) return;
         bounceDirection = ObjectRotation.Next(SelectedObjectType(), bounceDirection);
         ghostDirection = bounceDirection;
         if (tool == Tool.Spring) manualSpringDirection = true;
@@ -572,6 +757,7 @@ public sealed class EditorMode : GameMode
         LevelObject.BounceBall => bounceBallSprite,
         LevelObject.Spring => springSprite,
         LevelObject.Platform => platformSprite,
+        LevelObject.MovingPlatform => movingPlatformSprite,
         LevelObject.ExitFlag => exitSprite,
         _ => checkpointSprite
     };
@@ -640,6 +826,7 @@ public sealed class EditorMode : GameMode
     // another object's spot. The exit ignores the old exit, since dropping it moves that one.
     private bool ObjectFits(Point feet, string type, LevelObject ignore, BounceDirection direction = BounceDirection.Up, int? widthTiles = null)
     {
+        if (type == LevelObject.MovingPlatform && ignore != null && !MovingRouteFits(ignore)) return false;
         Rectangle bounds = ObjectBounds(feet, type, direction, widthTiles ?? ignore?.WidthTiles ?? 1, true);
         if (bounds.Left < 0 || bounds.Right > preview.Width * 8 || bounds.Top < 0 || bounds.Bottom > preview.Height * 8) return false;
         for (int y = bounds.Top / 8; y <= (bounds.Bottom - 1) / 8; y++)
@@ -657,6 +844,18 @@ public sealed class EditorMode : GameMode
     // First frame of the object's sprite at its feet; blocked spots are tinted red.
     private void DrawObject(string type, Point feet, bool valid, float alpha, BounceDirection direction = BounceDirection.Up, int widthTiles = 6)
     {
+        if (type == LevelObject.MovingPlatform)
+        {
+            var bounds = MovingPlatform.Bounds(feet, widthTiles);
+            MovingPlatform.DrawPieces(movingPlatformSprite, bounds,
+                (valid ? Color.White : new Color(255, 120, 120)) * alpha);
+            if (tool == Tool.MovingPlatform)
+            {
+                Fill(new Rectangle(bounds.Left - 1, bounds.Top + 2, 3, 4), Color.White * alpha);
+                Fill(new Rectangle(bounds.Right - 2, bounds.Top + 2, 3, 4), Color.White * alpha);
+            }
+            return;
+        }
         if (type == LevelObject.Platform)
         {
             var bounds = Platform.Bounds(feet, widthTiles);
@@ -701,6 +900,7 @@ public sealed class EditorMode : GameMode
         if (palette == Palette.Special && BounceBallButton.Contains(point)) return Tool.BounceBall;
         if (palette == Palette.Special && SpringButton.Contains(point)) return Tool.Spring;
         if (palette == Palette.Special && PlatformButton.Contains(point)) return Tool.Platform;
+        if (palette == Palette.Special && MovingPlatformButton.Contains(point)) return Tool.MovingPlatform;
         return Tool.None;
     }
 
@@ -745,6 +945,7 @@ public sealed class EditorMode : GameMode
             DrawPaletteItem(bounceBallSprite, new Rectangle(0, 0, 16, 16), BounceBallButton.Rect);
             DrawPaletteItem(springSprite, new Rectangle(0, 0, 16, 16), SpringButton.Rect);
             DrawPaletteItem(platformSprite, new Rectangle(24, 0, 8, 8), PlatformButton.Rect);
+            DrawPaletteItem(movingPlatformSprite, new Rectangle(0, 0, 24, 8), MovingPlatformButton.Rect);
         }
     }
 

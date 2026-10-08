@@ -22,6 +22,8 @@ public class Player
     private const float WallJumpSpeed = 110f;
     private readonly CollisionMap map;
     private readonly List<Platform> platforms;
+    private readonly List<MovingPlatform> movingPlatforms;
+    private MovingPlatform ignoredMovingPlatform;
     private readonly HashSet<int> ignoredPlatformTops = new();
     private float platformCrouchTime;
     // Where the player reappears after dying; checkpoints move it.
@@ -61,10 +63,11 @@ public class Player
     public bool IsCrouching { get; private set; }
     public CollisionRect Collider { get; }
 
-    public Player(CollisionMap map, Vector2 spawn, List<Platform> platforms = null)
+    public Player(CollisionMap map, Vector2 spawn, List<Platform> platforms = null, List<MovingPlatform> movingPlatforms = null)
     {
         this.map = map;
         this.platforms = platforms ?? new List<Platform>();
+        this.movingPlatforms = movingPlatforms ?? new List<MovingPlatform>();
         Spawn = spawn;
         Position = spawn;
         Collider = new CollisionRect((int)spawn.X, (int)spawn.Y - 6, 8, 12);
@@ -322,6 +325,8 @@ public class Player
             if (Collider.Rect.Left < 0 || Collider.Rect.Right > map.Width * map.TileSizeX)
                 return true;
             if (map.CheckCollision(Collider)) return true;
+            foreach (var platform in movingPlatforms)
+                if (platform != ignoredMovingPlatform && platform.Collider.Rect.Intersects(Collider.Rect)) return true;
             if (dx == 0 && dy > 0)
                 foreach (var platform in platforms)
                     if (!ignoredPlatformTops.Contains(platform.Collider.Rect.Top)
@@ -413,9 +418,44 @@ public class Player
     {
         if (!IsCrouching) return true;
         SetCrouching(false);
-        if (!map.CheckCollision(Collider)) return true;
+        bool blocked = map.CheckCollision(Collider);
+        foreach (var platform in movingPlatforms)
+            if (platform.Collider.Rect.Intersects(Collider.Rect)) blocked = true;
+        if (!blocked) return true;
         SetCrouching(true);
         return false;
+    }
+
+    public bool Rides(Rectangle platform) => velocity.Y >= 0 && Collider.Rect.Bottom == platform.Top
+        && Collider.Rect.Right > platform.Left && Collider.Rect.Left < platform.Right;
+
+    // Platform motion uses whole pixels and keeps voluntary movement remainders intact.
+    public void Transport(MovingPlatform platform, int dx, int dy)
+    {
+        ignoredMovingPlatform = platform;
+        try
+        {
+            for (int axis = 0; axis < 2; axis++)
+            {
+                int distance = axis == 0 ? dx : dy;
+                int step = Math.Sign(distance);
+                while (distance != 0)
+                {
+                    int sx = axis == 0 ? step : 0, sy = axis == 1 ? step : 0;
+                    if (SolidAt(sx, sy))
+                    {
+                        // A platform can leave a blocked rider behind; an actual
+                        // overlap means the player has been crushed and respawns.
+                        if (platform.Collider.Rect.Intersects(Collider.Rect)) Respawn();
+                        return;
+                    }
+                    Position += new Vector2(sx, sy);
+                    SyncCollider();
+                    distance -= step;
+                }
+            }
+        }
+        finally { ignoredMovingPlatform = null; }
     }
 
     public void Draw()

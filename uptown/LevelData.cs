@@ -18,12 +18,21 @@ public sealed class LevelObject
     public const string BounceBall = "bounceball";
     public const string Spring = "spring";
     public const string Platform = "platform";
+    public const string MovingPlatform = "movingplatform";
 
     public string Type { get; set; }
     public int X { get; set; }
     public int Y { get; set; }
     public int WidthTiles { get; set; } = 6;
+    public List<LevelWaypoint> Waypoints { get; set; } = new();
+    public float MoveSpeed { get; set; } = 40f;
     public BounceDirection Direction { get; set; } = BounceDirection.Up;
+}
+
+public sealed class LevelWaypoint
+{
+    public int X { get; set; }
+    public int Y { get; set; }
 }
 
 public sealed class LevelData
@@ -49,7 +58,8 @@ public sealed class LevelData
             TerrainTilesets = map.Tilesets == null ? new[] { "basic" } : (string[])map.Tilesets.Clone() };
         if (objects != null)
             foreach (var item in objects) data.Objects.Add(new LevelObject
-                { Type = item.Type, X = item.X, Y = item.Y, Direction = item.Direction, WidthTiles = item.WidthTiles });
+                { Type = item.Type, X = item.X, Y = item.Y, Direction = item.Direction, WidthTiles = item.WidthTiles,
+                    MoveSpeed = item.MoveSpeed, Waypoints = item.Waypoints?.ConvertAll(p => new LevelWaypoint { X = p.X, Y = p.Y }) ?? new() });
         data.Terrain = new int[data.Height][];
         data.TerrainMaterials = new int[data.Height][];
         for (int y = 0; y < data.Height; y++)
@@ -127,6 +137,29 @@ public sealed class LevelData
                     || Array.Exists(row, id => id < 0 || id >= names.Length)))))
             throw new InvalidDataException("Level file has invalid terrain materials.");
         data.Objects.RemoveAll(item => item == null);
+        foreach (var item in data.Objects)
+        {
+            item.Waypoints ??= new();
+            if (item.Type != LevelObject.MovingPlatform) continue;
+            if (!float.IsFinite(item.MoveSpeed) || item.MoveSpeed <= 0 || item.MoveSpeed > 240 || item.Waypoints.Count == 0)
+                throw new InvalidDataException("Moving platform needs a valid speed and a route.");
+            if (item.WidthTiles < 3 || item.WidthTiles > data.Width)
+                throw new InvalidDataException("Moving platform has invalid length.");
+            int halfWidth = item.WidthTiles * 4;
+            int lastX = item.X, lastY = item.Y;
+            if (lastX < halfWidth || lastX > data.Width * 8 - halfWidth || lastY < 8 || lastY > data.Height * 8)
+                throw new InvalidDataException("Moving platform starts outside the level.");
+            foreach (var point in item.Waypoints)
+            {
+                if (point == null || point.X < halfWidth || point.X > data.Width * 8 - halfWidth || point.Y < 8 || point.Y > data.Height * 8)
+                    throw new InvalidDataException("Moving platform route leaves the level.");
+                long dx = (long)point.X - lastX, dy = (long)point.Y - lastY;
+                if ((dx == 0 && dy == 0) || (dx != 0 && dy != 0 && Math.Abs(dx) != Math.Abs(dy)))
+                    throw new InvalidDataException("Moving platform route must use eight-direction segments.");
+                lastX = point.X;
+                lastY = point.Y;
+            }
+        }
         return data;
     }
 

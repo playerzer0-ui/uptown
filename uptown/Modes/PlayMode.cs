@@ -50,6 +50,7 @@ public sealed class PlayMode : GameMode
             else if (item.Type == LevelObject.ExitFlag) entities.Add(new ExitFlag(feet, item.Direction));
             else if (item.Type == LevelObject.BounceBall) entities.Add(new BounceBall(feet, item.Direction));
             else if (item.Type == LevelObject.Spring) entities.Add(new Spring(feet, item.Direction));
+            else if (item.Type == LevelObject.MovingPlatform) entities.Add(new MovingPlatform(item));
             else if (item.Type == LevelObject.Platform)
             {
                 var bounds = Platform.Bounds(new Point(item.X, item.Y), item.WidthTiles);
@@ -58,11 +59,14 @@ public sealed class PlayMode : GameMode
                     tileMap.Occupied(bounds.Right / 8, bounds.Top / 8)));
             }
         }
-        player = new Player(collisions, new Vector2(level.SpawnX, level.SpawnY), entities.OfType<Platform>().ToList());
+        player = new Player(collisions, new Vector2(level.SpawnX, level.SpawnY), entities.OfType<Platform>().ToList(),
+            entities.OfType<MovingPlatform>().ToList());
+        collisionMap = collisions;
         RefreshLayout();
     }
 
     public override void Enter() => previousMouse = Mouse.GetState();
+    private readonly CollisionMap collisionMap;
     public override void Leave() => levelCleared = null;
 
     public override void Update(GameTime gameTime)
@@ -72,6 +76,8 @@ public sealed class PlayMode : GameMode
         tileMap.Update(gameTime);
         // Once the level is complete the player freezes; objects keep animating.
         if (!levelComplete) player.Update(gameTime);
+        if (!levelComplete)
+            foreach (var platform in entities.OfType<MovingPlatform>()) platform.Advance(gameTime, player, collisionMap);
         entities.Update(gameTime);
         if (levelComplete) return;
         TouchSpecialObjects();
