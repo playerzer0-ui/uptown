@@ -56,6 +56,7 @@ public sealed class MovingPlatform : SpecialObject
 
     public void Advance(GameTime gameTime, Player player, CollisionMap terrain)
     {
+        if (player.IsDead) return;
         // Keep all intermediate waypoint turns even when a frame covers a corner.
         double remaining = Math.Min(gameTime.ElapsedGameTime.TotalSeconds, 0.25);
         while (remaining > 0)
@@ -94,12 +95,13 @@ public sealed class MovingPlatform : SpecialObject
             int pushY = dy > 0 ? next.Bottom - actor.Top : dy < 0 ? next.Top - actor.Bottom : 0;
             player.Transport(this, pushX, pushY);
         }
+        if (player.IsDead) return false;
         foreach (var spike in mountedSpikes)
         {
             spike.FollowPlatform();
             if (spike.Touches(player)) { spike.OnPlayerEnter(player); break; }
         }
-        return player.RespawnCount == respawns;
+        return !player.IsDead && player.RespawnCount == respawns;
     }
 
     public override void Draw()

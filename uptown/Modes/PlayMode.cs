@@ -16,6 +16,7 @@ public sealed class PlayMode : GameMode
     private readonly AutoTileMap tileMap;
     private readonly BackgroundMap background;
     private readonly Player player;
+    private readonly DeathEffect deathEffect = new(Player.DeathDuration);
     private readonly Camera camera;
     private readonly EntityList entities = new();
     private readonly SpriteFont font;
@@ -84,6 +85,7 @@ public sealed class PlayMode : GameMode
             entities.OfType<MovingPlatform>().ToList(), entities.OfType<Door>().ToList());
         collisionMap = collisions;
         player.Respawned += () => resetPending = true;
+        player.Died += deathEffect.Start;
         RefreshLayout();
     }
 
@@ -95,21 +97,25 @@ public sealed class PlayMode : GameMode
     {
         RefreshLayout();
         if (HandleStop(Mouse.GetState())) return;
+        deathEffect.Update(gameTime);
         tileMap.Update(gameTime);
         // Once the level is complete the player freezes; objects keep animating.
         if (!levelComplete) player.Update(gameTime);
         if (ResetAfterDeath()) { UpdateCamera(); return; }
+        if (player.IsDead) return;
         if (!levelComplete)
             foreach (var platform in entities.OfType<MovingPlatform>())
             {
                 platform.Advance(gameTime, player, collisionMap);
-                if (resetPending) break;
+                if (resetPending || player.IsDead) break;
             }
         if (ResetAfterDeath()) { UpdateCamera(); return; }
+        if (player.IsDead) return;
         entities.Update(gameTime);
         if (levelComplete) return;
         TouchSpecialObjects();
         if (ResetAfterDeath()) { UpdateCamera(); return; }
+        if (player.IsDead) return;
         UpdateCamera();
         CheckCompletion();
     }
@@ -144,6 +150,7 @@ public sealed class PlayMode : GameMode
         entities.Draw();
         player.Draw();
         foreach (var lightstick in entities.OfType<Lightstick>()) lightstick.DrawGlow();
+        deathEffect.Draw();
         Globals.spriteBatch.End();
 
         if (levelComplete || levelCleared != null)
@@ -201,7 +208,7 @@ public sealed class PlayMode : GameMode
         {
             bool inside = special.Touches(player);
             if (inside && !special.PlayerInside) special.OnPlayerEnter(player);
-            if (resetPending) return;
+            if (resetPending || player.IsDead) return;
             if (inside) special.OnPlayerStay(player);
             if (!inside && special.PlayerInside) special.OnPlayerExit(player);
             special.PlayerInside = inside;

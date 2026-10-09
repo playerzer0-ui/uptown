@@ -64,6 +64,10 @@ public class Player
     public bool IsCrouching { get; private set; }
     public CollisionRect Collider { get; }
     public event Action Respawned;
+    public event Action<Vector2> Died;
+    public const float DeathDuration = 0.45f;
+    public bool IsDead { get; private set; }
+    private float deathTime;
     public int RespawnCount { get; private set; }
 
     public Player(CollisionMap map, Vector2 spawn, List<Platform> platforms = null, List<MovingPlatform> movingPlatforms = null, List<Door> doors = null)
@@ -91,8 +95,14 @@ public class Player
     public void Update(GameTime gameTime)
     {
         float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
+        if (IsDead)
+        {
+            deathTime -= dt;
+            if (deathTime <= 0.000001f) Respawn();
+            return;
+        }
         var input = Globals.Input;
-        if (input.JustPressed("Respawn")) { Respawn(); return; }
+        if (input.JustPressed("Respawn")) { Die(); return; }
         bool jumpPressed = input.JustPressed("Jump");
         recentJumpPress = jumpPressed ? PerfectBounceWindow : Math.Max(0, recentJumpPress - dt);
         bounceBoostWindow = Math.Max(0, bounceBoostWindow - dt);
@@ -248,7 +258,7 @@ public class Player
             // between landing and jumping. A held button alone never repeats.
             if (jumpBuffer > 0 && TryStand()) BeginJump();
         }
-        if (Position.Y > map.Height * map.TileSizeY + 32) { Respawn(); return; }
+        if (Position.Y > map.Height * map.TileSizeY + 32) { Die(); return; }
         IsWallSliding = CanWallSlide(moveX);
 
         // Input and wall contact remain stable even when collision resolution
@@ -408,10 +418,19 @@ public class Player
         }
     }
 
-    public void Die() => Respawn();
+    public void Die()
+    {
+        if (IsDead) return;
+        IsDead = true;
+        deathTime = DeathDuration;
+        velocity = remainder = Vector2.Zero;
+        Died?.Invoke(Collider.Rect.Center.ToVector2());
+    }
 
     private void Respawn()
     {
+        IsDead = false;
+        deathTime = 0;
         ignoredPlatformTops.Clear();
         platformCrouchTime = 0;
         recentJumpPress = bounceBoostWindow = 0;
@@ -458,11 +477,12 @@ public class Player
     }
 
     public bool Rides(Rectangle platform) => velocity.Y >= 0 && Collider.Rect.Bottom == platform.Top
-        && Collider.Rect.Right > platform.Left && Collider.Rect.Left < platform.Right;
+        && !IsDead && Collider.Rect.Right > platform.Left && Collider.Rect.Left < platform.Right;
 
     // Platform motion uses whole pixels and keeps voluntary movement remainders intact.
     public void Transport(MovingPlatform platform, int dx, int dy)
     {
+        if (IsDead) return;
         ignoredMovingPlatform = platform;
         try
         {
@@ -477,7 +497,7 @@ public class Player
                     {
                         // A platform can leave a blocked rider behind; an actual
                         // overlap means the player has been crushed and respawns.
-                        if (platform.Collider.Rect.Intersects(Collider.Rect)) Respawn();
+                        if (platform.Collider.Rect.Intersects(Collider.Rect)) Die();
                         return;
                     }
                     Position += new Vector2(sx, sy);
@@ -491,6 +511,7 @@ public class Player
 
     public void Draw()
     {
+        if (IsDead) return;
         animation.Position = Position;
         animation.Stretch = visualStretch;
         animation.SpriteEffect = facing < 0 ? SpriteEffects.FlipHorizontally : SpriteEffects.None;

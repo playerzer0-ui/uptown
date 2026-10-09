@@ -18,6 +18,7 @@ namespace uptown
         public ModeId CurrentMode { get; private set; }
         private const int InitialWindowWidth = 1280;
         private const int InitialWindowHeight = 720;
+        private bool enforcingMinimumSize;
 
         public Game1()
         {
@@ -32,8 +33,26 @@ namespace uptown
             _graphics.PreferredBackBufferHeight = InitialWindowHeight;
             Window.AllowUserResizing = true;
             _graphics.ApplyChanges();
+            Window.ClientSizeChanged += (_, _) => EnforceMinimumWindowSize();
 
             base.Initialize();
+        }
+
+        private void EnforceMinimumWindowSize()
+        {
+            if (enforcingMinimumSize) return;
+            Rectangle bounds = Window.ClientBounds;
+            // Minimized windows may report zero dimensions.
+            if (bounds.Width <= 0 || bounds.Height <= 0
+                || (bounds.Width >= InitialWindowWidth && bounds.Height >= InitialWindowHeight)) return;
+            enforcingMinimumSize = true;
+            try
+            {
+                _graphics.PreferredBackBufferWidth = Math.Max(InitialWindowWidth, bounds.Width);
+                _graphics.PreferredBackBufferHeight = Math.Max(InitialWindowHeight, bounds.Height);
+                _graphics.ApplyChanges();
+            }
+            finally { enforcingMinimumSize = false; }
         }
 
         protected override void LoadContent()
@@ -87,6 +106,7 @@ namespace uptown
         protected override void UnloadContent()
         {
             uptown.Decorations.Lightstick.DisposeGlow();
+            DeathEffect.DisposeTexture();
             if (_modes.TryGetValue(ModeId.Editor, out var editor)) ((EditorMode)editor).Dispose();
             base.UnloadContent();
         }
