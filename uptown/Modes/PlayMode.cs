@@ -7,6 +7,7 @@ using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using NodeTesting.models;
 using uptown.SpecialObjects;
+using uptown.Decorations;
 
 namespace uptown.Modes;
 
@@ -51,7 +52,8 @@ public sealed class PlayMode : GameMode
         foreach (var item in level.Objects)
         {
             var feet = new Vector2(item.X, item.Y);
-            if (item.Type == LevelObject.Checkpoint) entities.Add(new Checkpoint(feet, item.Direction));
+            if (item.Type == LevelObject.Lightstick && Lightstick.Supported(feet.ToPoint(), background.Occupied)) entities.Add(new Lightstick(feet));
+            else if (item.Type == LevelObject.Checkpoint) entities.Add(new Checkpoint(feet, item.Direction));
             else if (item.Type == LevelObject.ExitFlag) entities.Add(new ExitFlag(feet, item.Direction));
             else if (item.Type == LevelObject.BounceBall) entities.Add(new BounceBall(feet, item.Direction));
             else if (item.Type == LevelObject.Spring) entities.Add(new Spring(feet, item.Direction));
@@ -141,6 +143,7 @@ public sealed class PlayMode : GameMode
         tileMap.Draw();
         entities.Draw();
         player.Draw();
+        foreach (var lightstick in entities.OfType<Lightstick>()) lightstick.DrawGlow();
         Globals.spriteBatch.End();
 
         if (levelComplete || levelCleared != null)

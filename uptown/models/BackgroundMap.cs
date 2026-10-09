@@ -7,7 +7,7 @@ namespace NodeTesting.models;
 // Decoration only: no neighbor selection, collision, or terrain support.
 public sealed class BackgroundMap
 {
-    public static readonly string[] Names = { "texturewall", "texturewallgrey" };
+    public static readonly string[] Names = { "texturewall", "texturewallgrey", "whitewall", "blackwall", "textureblackwall" };
     private readonly Texture2D[] textures;
     private int[,] cells;
     public int Width => cells.GetLength(1);
@@ -35,6 +35,9 @@ public sealed class BackgroundMap
         if (tile < -1 || tile >= Names.Length) throw new ArgumentOutOfRangeException(nameof(tile));
         cells[y, x] = tile;
     }
+
+    public bool Occupied(int x, int y) =>
+        x >= 0 && y >= 0 && x < Width && y < Height && cells[y, x] >= 0;
 
     public int[][] Capture()
     {

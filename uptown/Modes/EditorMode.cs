@@ -6,11 +6,12 @@ using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using NodeTesting.models;
 using uptown.SpecialObjects;
+using uptown.Decorations;
 
 namespace uptown.Modes;
 
 // Terrain painting, object placement, and category palettes.
-public sealed class EditorMode : GameMode
+public sealed class EditorMode : GameMode, IDisposable
 {
     private AutoTileMap preview;
     private BackgroundMap background;
@@ -22,6 +23,8 @@ public sealed class EditorMode : GameMode
     private readonly Action<LevelData, Func<bool>> startSaveValidation;
     private Point? spawn;
     private string savePath;
+    private readonly TextInput levelNameInput;
+    public bool IsEditingText => levelNameInput.IsFocused;
     private LevelData snapshot;
     public LevelData Capture()
     {
@@ -30,8 +33,8 @@ public sealed class EditorMode : GameMode
             && !Spike.Supported(new Point(item.X, item.Y), item.Direction, preview.Occupied, objects));
         return LevelData.Capture(preview, spawn, objects, background);
     }
-    private enum Tool { None, Terrain, Background, Spawn, Checkpoint, Exit, BounceBall, Spring, Platform, MovingPlatform, Spike, Door }
-    private enum Palette { Terrain, Special, Sprites, Background }
+    private enum Tool { None, Terrain, Background, Spawn, Checkpoint, Exit, BounceBall, Spring, Platform, MovingPlatform, Spike, Door, Lightstick }
+    private enum Palette { Terrain, Special, Sprites, Background, Decoration }
     private Palette palette;
     private readonly Texture2D[] bars;
     private bool draggingFromPalette;
@@ -46,6 +49,7 @@ public sealed class EditorMode : GameMode
     private readonly CollisionRect MovingPlatformButton = new(48, 83, 27, 27);
     private readonly CollisionRect SpikeButton = new(16, 114, 27, 27);
     private readonly CollisionRect DoorButton = new(48, 114, 27, 27);
+    private readonly CollisionRect LightstickButton = new(16, 21, 27, 27);
     private LevelObject pathDraft;
     private LevelObject pathOriginal;
     private LevelObject resizingPlatform;
@@ -91,6 +95,7 @@ public sealed class EditorMode : GameMode
     private readonly Texture2D movingPlatformSprite;
     private readonly Texture2D spikeSprite;
     private readonly Texture2D doorSprite;
+    private readonly Texture2D lightstickSprite;
     private readonly Texture2D pixel;
     private readonly Camera camera;
     private bool isPanning;
@@ -104,13 +109,20 @@ public sealed class EditorMode : GameMode
     private readonly CollisionRect HomeButton;
     private readonly CollisionRect ToggleButton;
 
-    public EditorMode(Action<ModeId> switchMode, Action<string> showStatus, Action<LevelData, Func<bool>> startSaveValidation)
+    public EditorMode(Game game, Action<ModeId> switchMode, Action<string> showStatus, Action<LevelData, Func<bool>> startSaveValidation)
     {
         viewWidth = 320;
         viewHeight = 180;
         this.switchMode = switchMode;
         this.showStatus = showStatus;
         this.startSaveValidation = startSaveValidation;
+        levelNameInput = new TextInput(game, Globals.Content.Load<SpriteFont>("File"),
+            new CollisionRect(160, 16, 144, 24), "Level name")
+        {
+            MaxLength = 48,
+            ScreenToLocal = screen => screen / uiScale
+        };
+        levelNameInput.Submitted += _ => levelNameInput.Blur();
         saveIcon = Globals.Content.Load<Texture2D>("graphics/ui/save");
         playIcon = Globals.Content.Load<Texture2D>("graphics/ui/play");
         homeIcon = Globals.Content.Load<Texture2D>("graphics/ui/home");
@@ -120,7 +132,8 @@ public sealed class EditorMode : GameMode
             Globals.Content.Load<Texture2D>("graphics/ui/tilebar"),
             Globals.Content.Load<Texture2D>("graphics/ui/specialbar"),
             Globals.Content.Load<Texture2D>("graphics/ui/spritebar"),
-            Globals.Content.Load<Texture2D>("graphics/ui/backgroundbar")
+            Globals.Content.Load<Texture2D>("graphics/ui/backgroundbar"),
+            Globals.Content.Load<Texture2D>("graphics/ui/decobar")
         };
         // CollisionRect constructors take center coordinates, not top-left.
         SaveButton = new CollisionRect(viewWidth - 76, 16, ButtonSize, ButtonSize);
@@ -153,6 +166,7 @@ public sealed class EditorMode : GameMode
         movingPlatformSprite = Globals.Content.Load<Texture2D>("graphics/special_objects/moving_platform");
         spikeSprite = Globals.Content.Load<Texture2D>("graphics/special_objects/spike");
         doorSprite = Globals.Content.Load<Texture2D>("graphics/special_objects/door");
+        lightstickSprite = Globals.Content.Load<Texture2D>("graphics/decoration/lightstick");
         pixel = new Texture2D(Globals.graphics.GraphicsDevice, 1, 1);
         pixel.SetData(new[] { Color.White });
         var blank = new int[80, 400];
@@ -168,6 +182,8 @@ public sealed class EditorMode : GameMode
 
     public override void Enter()
     {
+        levelNameInput.Blur();
+        levelNameInput.SyncInput();
         previousMouse = Mouse.GetState();
         isPanning = false;
         lastPaintCell = null;
@@ -177,12 +193,25 @@ public sealed class EditorMode : GameMode
 
     public override void Leave()
     {
+        levelNameInput.Blur();
         isPanning = false;
         CancelDrag();
     }
 
     public override void Update(GameTime gameTime)
     {
+        RefreshLayout();
+        bool wasEditingText = levelNameInput.IsFocused;
+        levelNameInput.Update(gameTime);
+        if (wasEditingText && (Globals.Input.KeyJustDown(Keys.Enter) || Globals.Input.KeyJustDown(Keys.Escape)
+            || Globals.Input.KeyJustDown(Keys.Tab))) return;
+        if (levelNameInput.IsFocused)
+        {
+            lastPaintCell = null;
+            if ((Globals.Input.KeyDown(Keys.LeftControl) || Globals.Input.KeyDown(Keys.RightControl))
+                && Globals.Input.KeyJustDown(Keys.S)) SaveLevel();
+            return;
+        }
         pathClickAge += (float)gameTime.ElapsedGameTime.TotalSeconds;
         preview.Update(gameTime);
         bool control = Globals.Input.KeyDown(Keys.LeftControl) || Globals.Input.KeyDown(Keys.RightControl);
@@ -199,7 +228,8 @@ public sealed class EditorMode : GameMode
         bool overLevel = new Rectangle(sidebarOpen ? SidebarWidth : 0, 0,
             viewWidth - (sidebarOpen ? SidebarWidth : 0), viewHeight).Contains(pointer)
             && !ToggleButton.Contains(pointer) && !SaveButton.Contains(pointer)
-            && !PlayButton.Contains(pointer) && !HomeButton.Contains(pointer);
+            && !PlayButton.Contains(pointer) && !HomeButton.Contains(pointer)
+            && !levelNameInput.Bounds.Contains(pointer);
 
         if (mouse.MiddleButton == ButtonState.Released) isPanning = false;
         else if (previousMouse.MiddleButton == ButtonState.Released && overLevel) isPanning = true;
@@ -232,7 +262,7 @@ public sealed class EditorMode : GameMode
         {
             CancelDrag();
             lastPaintCell = null;
-            if (pointer.X >= 64 && pointer.Y >= 0 && pointer.Y < 128)
+            if (pointer.X >= 64 && pointer.Y >= 0 && pointer.Y < bars.Length * 32)
             {
                 palette = (Palette)(pointer.Y / 32);
                 tool = Tool.None;
@@ -258,6 +288,7 @@ public sealed class EditorMode : GameMode
                         selectedBackground = BackgroundAt(pointer);
                         showStatus("Background: " + BackgroundMap.Names[selectedBackground] + " | Left-drag: paint | Right-drag: erase");
                     }
+                    if (tool == Tool.Lightstick) showStatus("Lightstick | Place on a background tile | Drag to move | Right-click: delete");
                     draggingFromPalette = tool != Tool.Background && tool != Tool.Terrain && tool != Tool.Platform && tool != Tool.MovingPlatform;
                     if (IsSpecialTool()) showStatus(tool == Tool.Platform
                         ? "Platform | Drag to paint horizontally from terrain | Right-drag: erase"
@@ -280,7 +311,7 @@ public sealed class EditorMode : GameMode
             return;
         }
         // Spawn, checkpoint and exit tools: press on the level, drag the ghost around, release to drop it.
-        if (tool is Tool.Spawn or Tool.Checkpoint or Tool.Exit or Tool.BounceBall or Tool.Spring or Tool.Spike or Tool.Door)
+        if (tool is Tool.Spawn or Tool.Checkpoint or Tool.Exit or Tool.BounceBall or Tool.Spring or Tool.Spike or Tool.Door or Tool.Lightstick)
         {
             bool held = mouse.LeftButton == ButtonState.Pressed;
             if (held && (ghost.HasValue || ((clicked || draggingFromPalette) && overLevel)))
@@ -297,7 +328,7 @@ public sealed class EditorMode : GameMode
                 var cell = SpawnCellAt(position);
                 // Special sprites are 16px wide: center on a tile boundary so their
                 // left/right edges align with the 8px grid instead of spanning three columns.
-                if (tool != Tool.Spawn && tool != Tool.Spike && tool != Tool.Door) cell.X += 4;
+                if (tool != Tool.Spawn && tool != Tool.Spike && tool != Tool.Door && tool != Tool.Lightstick) cell.X += 4;
                 ghost = cell;
                 ghostDirection = bounceDirection;
                 if (tool == Tool.Spring && !manualSpringDirection)
@@ -441,6 +472,7 @@ public sealed class EditorMode : GameMode
         DrawButton(SaveButton, saveIcon, new Color(125, 151, 161));
         DrawButton(PlayButton, playIcon, new Color(225, 69, 59));
         DrawButton(HomeButton, homeIcon, new Color(149, 213, 112));
+        levelNameInput.Draw();
         DrawButton(ToggleButton, arrowIcon, new Color(24, 100, 127),
             effects: sidebarOpen ? SpriteEffects.None : SpriteEffects.FlipHorizontally);
         Globals.spriteBatch.End();
@@ -460,6 +492,7 @@ public sealed class EditorMode : GameMode
         objects.AddRange(data.Objects);
         CancelDrag();
         savePath = path;
+        levelNameInput.Text = Path.GetFileNameWithoutExtension(path);
         snapshot = Capture();
         lastPaintCell = null;
         FitLevel();
@@ -482,22 +515,30 @@ public sealed class EditorMode : GameMode
         foreach (var item in objects)
             if (!ObjectFits(new Point(item.X, item.Y), item.Type, item, item.Direction))
             {
-                showStatus("Cannot save: an object is blocked or a spring has no supporting terrain.");
+                showStatus("Cannot save: an object is blocked or missing its required terrain/background support.");
                 return;
             }
-        string path = savePath ?? Path.Combine(LevelData.SaveFolder(),
-            "Level-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + ".uptown");
-        data.Name = Path.GetFileNameWithoutExtension(path);
+        string name = levelNameInput.Text.Trim();
+        if (name.Length == 0) name = savePath == null ? "Level-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff")
+            : Path.GetFileNameWithoutExtension(savePath);
+        string path;
+        try { path = LevelData.NamedSavePath(name); }
+        catch (ArgumentException error) { showStatus(error.Message); return; }
+        if (File.Exists(path) && !string.Equals(path, savePath, StringComparison.OrdinalIgnoreCase))
+        { showStatus("That level name already exists. Choose another name."); return; }
+        data.Name = name;
+        string previousPath = savePath;
         // Only this exact snapshot is saved after its fresh playtest reaches an exit.
-        startSaveValidation(data, () => SaveClearedLevel(data, path));
+        startSaveValidation(data, () => SaveClearedLevel(data, path, previousPath));
     }
 
-    private bool SaveClearedLevel(LevelData data, string path)
+    private bool SaveClearedLevel(LevelData data, string path, string previousPath)
     {
         try
         {
-            data.Save(path);
+            data.SaveAs(path, previousPath);
             savePath = path;
+            levelNameInput.Text = data.Name;
             showStatus("Congratulations! Level cleared and saved: " + path);
             return true;
         }
@@ -540,7 +581,8 @@ public sealed class EditorMode : GameMode
         if (tool == Tool.Spawn) { TrySetSpawn(feet); return; }
         if (!ghostValid)
         {
-            showStatus(tool == Tool.Door ? "Door needs terrain directly above and below its doorway."
+            showStatus(tool == Tool.Lightstick ? "Lightstick needs a background tile and clear space inside the level."
+                : tool == Tool.Door ? "Door needs terrain directly above and below its doorway."
                 : tool == Tool.Spike ? "Spike needs terrain, the top of a platform, or a solid moving-platform side behind its base."
                 : tool == Tool.Spring
                 ? "Spring needs clear space and solid terrain across its mounting base."
@@ -744,6 +786,7 @@ public sealed class EditorMode : GameMode
         Tool.MovingPlatform => LevelObject.MovingPlatform,
         Tool.Spike => LevelObject.Spike,
         Tool.Door => LevelObject.Door,
+        Tool.Lightstick => LevelObject.Lightstick,
         Tool.Exit => LevelObject.ExitFlag,
         _ => LevelObject.Checkpoint
     };
@@ -761,7 +804,7 @@ public sealed class EditorMode : GameMode
                 var item = objects[i];
                 var feet = new Point(item.X, item.Y);
                 if (!ObjectBounds(feet, item.Type, item.Direction, item.WidthTiles).Contains(world)) continue;
-                if (item.Type is LevelObject.Platform or LevelObject.MovingPlatform or LevelObject.Door) return;
+                if (item.Type is LevelObject.Platform or LevelObject.MovingPlatform or LevelObject.Door or LevelObject.Lightstick) return;
                 var next = ObjectRotation.Next(item.Type, item.Direction);
                 if (!ObjectFits(feet, item.Type, item, next))
                 {
@@ -870,6 +913,7 @@ public sealed class EditorMode : GameMode
         if (type == LevelObject.Door && !Door.Supported(feet, preview.Occupied)) return false;
         if (type == LevelObject.Spring && !SpringSupported(feet, direction)) return false;
         if (type == LevelObject.Spike && !Spike.Supported(feet, direction, preview.Occupied, objects)) return false;
+        if (type == LevelObject.Lightstick && !Lightstick.Supported(feet, background.Occupied)) return false;
         foreach (var item in objects)
         {
             if (item == ignore || (type == LevelObject.ExitFlag && item.Type == LevelObject.ExitFlag)) continue;
@@ -882,6 +926,13 @@ public sealed class EditorMode : GameMode
     private void DrawObject(string type, Point feet, bool valid, float alpha, BounceDirection direction = BounceDirection.Up, int widthTiles = 6)
     {
         alpha *= ForegroundOpacity;
+        if (type == LevelObject.Lightstick)
+        {
+            if (valid) Lightstick.DrawGlow(feet.ToVector2(), alpha);
+            Globals.spriteBatch.Draw(lightstickSprite, Lightstick.Bounds(feet),
+                (valid ? Color.White : new Color(255, 120, 120)) * alpha);
+            return;
+        }
         if (type == LevelObject.Door)
         {
             Globals.spriteBatch.Draw(doorSprite, feet.ToVector2(), new Rectangle(0, 0, 16, 16),
@@ -956,6 +1007,7 @@ public sealed class EditorMode : GameMode
     {
         if (BackgroundAt(point) >= 0) return Tool.Background;
         if (TerrainAt(point) >= 0) return Tool.Terrain;
+        if (palette == Palette.Decoration && LightstickButton.Contains(point)) return Tool.Lightstick;
         if (palette == Palette.Sprites && SpawnButton.Contains(point)) return Tool.Spawn;
         if (palette == Palette.Special && CheckpointButton.Contains(point)) return Tool.Checkpoint;
         if (palette == Palette.Special && ExitButton.Contains(point)) return Tool.Exit;
@@ -1006,6 +1058,8 @@ public sealed class EditorMode : GameMode
             for (int i = 0; i < backgroundTextures.Length; i++)
                 DrawPaletteItem(backgroundTextures[i], new Rectangle(0, 0, 8, 8), backgroundButtons[i].Rect);
         }
+        else if (palette == Palette.Decoration)
+            DrawPaletteItem(lightstickSprite, new Rectangle(0, 0, 8, 8), LightstickButton.Rect);
         else if (palette == Palette.Sprites)
             DrawPaletteItem(playerSprite, new Rectangle(0, 0, 16, 16), SpawnButton.Rect);
         else if (palette == Palette.Special)
@@ -1088,6 +1142,10 @@ public sealed class EditorMode : GameMode
         PlayButton.UpdateRect(viewWidth - 48, 16);
         HomeButton.UpdateRect(viewWidth - 20, 16);
         ToggleButton.UpdateRect((sidebarOpen ? SidebarWidth : 0) + 6, viewHeight / 2);
+        int nameLeft = (sidebarOpen ? SidebarWidth : 0) + 8;
+        int nameWidth = Math.Max(36, Math.Min(144, viewWidth - nameLeft - 92));
+        levelNameInput.Collider.Resize(nameWidth, 24);
+        levelNameInput.Collider.UpdateRect(nameLeft + nameWidth / 2, 16);
         isPanning = false;
         lastPaintCell = null;
     }
@@ -1098,6 +1156,8 @@ public sealed class EditorMode : GameMode
         return new Vector2((left + windowWidth - 8 * uiScale) / 2,
             (36 * uiScale + windowHeight - 8 * uiScale) / 2);
     }
+
+    public void Dispose() => levelNameInput.Dispose();
 
     private void FitLevel()
     {

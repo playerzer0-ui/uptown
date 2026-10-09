@@ -44,7 +44,7 @@ namespace uptown
             Globals.spriteBatch = _spriteBatch;
             Globals.graphics = _graphics;
 
-            _modes.Add(ModeId.Editor, new EditorMode(SwitchMode, message => Window.Title = message, StartSaveValidation));
+            _modes.Add(ModeId.Editor, new EditorMode(this, SwitchMode, message => Window.Title = message, StartSaveValidation));
             _modes.Add(ModeId.Home, new HomeMode(
                 play: () => SwitchMode(ModeId.Play),
                 create: () => SwitchMode(ModeId.Editor),
@@ -57,6 +57,12 @@ namespace uptown
         protected override void Update(GameTime gameTime)
         {
             Globals.Input.Update();
+            if (CurrentMode == ModeId.Editor && ((EditorMode)_modes[ModeId.Editor]).IsEditingText)
+            {
+                _activeMode.Update(gameTime);
+                base.Update(gameTime);
+                return;
+            }
             if (Keyboard.GetState().IsKeyDown(Keys.Escape))
                 Exit();
 
@@ -76,6 +82,13 @@ namespace uptown
             _activeMode.Draw();
 
             base.Draw(gameTime);
+        }
+
+        protected override void UnloadContent()
+        {
+            uptown.Decorations.Lightstick.DisposeGlow();
+            if (_modes.TryGetValue(ModeId.Editor, out var editor)) ((EditorMode)editor).Dispose();
+            base.UnloadContent();
         }
 
         private void LoadLevel(string path)

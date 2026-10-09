@@ -20,6 +20,30 @@
 /processorParam:TextureFormat=Compressed
 /build:File.spritefont
 
+#begin graphics/backgroundtiles/blackwall.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:graphics/backgroundtiles/blackwall.png;graphics/backgroundtiles/blackwall
+
+#begin graphics/backgroundtiles/textureblackwall.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:graphics/backgroundtiles/textureblackwall.png;graphics/backgroundtiles/textureblackwall
+
 #begin graphics/backgroundtiles/texturewall.png
 /importer:TextureImporter
 /processor:TextureProcessor
@@ -43,6 +67,30 @@
 /processorParam:MakeSquare=False
 /processorParam:TextureFormat=Color
 /build:graphics/backgroundtiles/texturewallgrey.png;graphics/backgroundtiles/texturewallgrey
+
+#begin graphics/backgroundtiles/whitewall.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:graphics/backgroundtiles/whitewall.png;graphics/backgroundtiles/whitewall
+
+#begin graphics/decoration/lightstick.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:graphics/decoration/lightstick.png;graphics/decoration/lightstick
 
 #begin graphics/player/climb.png
 /importer:TextureImporter

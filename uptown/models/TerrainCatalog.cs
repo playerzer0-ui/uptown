@@ -2,7 +2,7 @@ namespace NodeTesting.models;
 
 public static class TerrainCatalog
 {
-    public static readonly string[] Names = { "basic", "wall", "glass", "grass", "ground" };
+    public static readonly string[] Names = { "basic", "wall", "glass", "grass", "ground", "floor" };
     public static string[] Paths()
     {
         var paths = new string[Names.Length];

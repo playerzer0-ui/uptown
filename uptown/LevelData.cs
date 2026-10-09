@@ -21,6 +21,7 @@ public sealed class LevelObject
     public const string MovingPlatform = "movingplatform";
     public const string Spike = "spike";
     public const string Door = "door";
+    public const string Lightstick = "lightstick";
 
     public string Type { get; set; }
     public int X { get; set; }
@@ -195,11 +196,31 @@ public sealed class LevelData
         return files;
     }
 
-    public void Save(string path)
+    public static string NamedSavePath(string name)
+    {
+        name = name.Trim();
+        if (name.Length == 0 || name.Length > 48 || name.EndsWith('.') || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+            throw new ArgumentException("Use a level name up to 48 characters without filename symbols or a trailing dot.");
+        string stem = name.Split('.')[0].ToUpperInvariant();
+        if (stem is "CON" or "PRN" or "AUX" or "NUL" || (stem.Length == 4
+            && (stem.StartsWith("COM") || stem.StartsWith("LPT")) && stem[3] >= '1' && stem[3] <= '9'))
+            throw new ArgumentException("That level name is reserved by Windows. Choose another name.");
+        return Path.Combine(SaveFolder(), name + ".uptown");
+    }
+
+    public void SaveAs(string path, string previousPath)
+    {
+        bool samePath = string.Equals(path, previousPath, StringComparison.OrdinalIgnoreCase);
+        Save(path, samePath);
+        if (!samePath && previousPath != null && File.Exists(previousPath)) File.Delete(previousPath);
+    }
+
+    public void Save(string path, bool overwrite = true)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path));
         string temp = path + ".tmp";
         File.WriteAllText(temp, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
-        File.Move(temp, path, true);
+        try { File.Move(temp, path, overwrite); }
+        finally { if (File.Exists(temp)) File.Delete(temp); }
     }
 }
