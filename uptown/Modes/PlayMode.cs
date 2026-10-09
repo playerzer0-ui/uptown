@@ -13,7 +13,7 @@ namespace uptown.Modes;
 
 public sealed class PlayMode : GameMode
 {
-    private readonly AutoTileMap tileMap;
+    private readonly Map tileMap;
     private readonly BackgroundMap background;
     private readonly Player player;
     private readonly DeathEffect deathEffect = new(Player.DeathDuration);
@@ -36,12 +36,46 @@ public sealed class PlayMode : GameMode
     private int windowHeight;
     private int renderScale = 1;
 
+    // The normal Play entry is the fixed CSV lobby; editor tests use the LevelData overload.
+    public PlayMode(Action returnToHome)
+    {
+        returnToEditor = returnToHome;
+        string mapFolder = Path.Combine(AppContext.BaseDirectory, "Content", "maps");
+        tileMap = new TileMap("graphics/tileset/floor", 8, 8, Path.Combine(mapFolder, "lobby.csv"));
+        collisionMap = new CollisionMap("graphics/tileset/collision", 8, 8,
+            Path.Combine(mapFolder, "lobby_collision.csv"));
+        if (tileMap.Width != collisionMap.Width || tileMap.Height != collisionMap.Height)
+            throw new InvalidDataException("Lobby terrain and collision maps must have matching dimensions.");
+        camera = new Camera();
+        font = Globals.Content.Load<SpriteFont>("File");
+        stopIcon = Globals.Content.Load<Texture2D>("graphics/ui/stop");
+        player = new Player(collisionMap, FindLobbySpawn(collisionMap));
+        player.Respawned += () => resetPending = true;
+        player.Died += deathEffect.Start;
+        RefreshLayout();
+    }
+
+    private static Vector2 FindLobbySpawn(CollisionMap collisions)
+    {
+        // Start one tile in from the left, standing above the lowest clear floor.
+        for (int column = 1; column < collisions.Width; column++)
+            for (int row = collisions.Height - 1; row >= 2; row--)
+            {
+                int x = column * collisions.TileSizeX + collisions.TileSizeX / 2;
+                int y = row * collisions.TileSizeY;
+                if (collisions.IsSolid(column, row) && !collisions.CheckCollision(new Rectangle(x - 4, y - 12, 8, 12)))
+                    return new Vector2(x, y);
+            }
+        throw new InvalidDataException("Lobby collision map needs a clear player spawn above a floor near the left edge.");
+    }
+
     public PlayMode(LevelData level, Action returnToEditor, Func<bool> levelCleared = null)
     {
         this.returnToEditor = returnToEditor;
         this.levelCleared = levelCleared;
-        tileMap = new AutoTileMap(TerrainCatalog.Paths(), level.CreateGrid(false),
+        var terrain = new AutoTileMap(TerrainCatalog.Paths(), level.CreateGrid(false),
             level.CreateMaterials(TerrainCatalog.Names));
+        tileMap = terrain;
         background = new BackgroundMap(level.Width, level.Height, level.CreateBackgroundGrid());
         var collisions = new CollisionMap("graphics/tileset/collision", 8, 8,
             level.CreateGrid(true));
@@ -60,7 +94,7 @@ public sealed class PlayMode : GameMode
             else if (item.Type == LevelObject.ExitFlag) entities.Add(new ExitFlag(feet, item.Direction));
             else if (item.Type == LevelObject.BounceBall) entities.Add(new BounceBall(feet, item.Direction));
             else if (item.Type == LevelObject.Spring) entities.Add(new Spring(feet, item.Direction));
-            else if (item.Type == LevelObject.Door && Door.Supported(new Point(item.X, item.Y), tileMap.Occupied)) entities.Add(new Door(feet));
+            else if (item.Type == LevelObject.Door && Door.Supported(new Point(item.X, item.Y), terrain.Occupied)) entities.Add(new Door(feet));
             else if (item.Type == LevelObject.MovingPlatform)
             {
                 var platform = new MovingPlatform(item);
@@ -71,13 +105,13 @@ public sealed class PlayMode : GameMode
             {
                 var bounds = Platform.Bounds(new Point(item.X, item.Y), item.WidthTiles);
                 entities.Add(new Platform(feet, item.WidthTiles,
-                    tileMap.Occupied(bounds.Left / 8 - 1, bounds.Top / 8),
-                    tileMap.Occupied(bounds.Right / 8, bounds.Top / 8)));
+                    terrain.Occupied(bounds.Left / 8 - 1, bounds.Top / 8),
+                    terrain.Occupied(bounds.Right / 8, bounds.Top / 8)));
             }
         }
         foreach (var item in level.Objects)
         {
-            if (item.Type != LevelObject.Spike || !Spike.Supported(new Point(item.X, item.Y), item.Direction, tileMap.Occupied, level.Objects)) continue;
+            if (item.Type != LevelObject.Spike || !Spike.Supported(new Point(item.X, item.Y), item.Direction, terrain.Occupied, level.Objects)) continue;
             var support = Spike.SupportingObject(new Point(item.X, item.Y), item.Direction, level.Objects);
             MovingPlatform mount = null;
             if (support != null) movingMounts.TryGetValue(support, out mount);
@@ -176,7 +210,7 @@ public sealed class PlayMode : GameMode
         Globals.graphics.GraphicsDevice.Clear(PicoPallete.blue);
         Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp,
             transformMatrix: WindowRendering.PixelAligned(camera.Transform()));
-        background.Draw();
+        background?.Draw();
         tileMap.Draw();
         entities.Draw();
         foreach (var elevator in entities.OfType<Elevator>())

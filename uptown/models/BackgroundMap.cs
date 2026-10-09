@@ -53,9 +53,16 @@ public sealed class BackgroundMap
     public void Expand(int width, int height)
     {
         if (width < Width || height < Height) throw new ArgumentOutOfRangeException(nameof(width));
+        Resize(width, height);
+    }
+
+    public void Resize(int width, int height)
+    {
+        if (width < 1 || height < 1 || (long)width * height > 1048576)
+            throw new ArgumentOutOfRangeException(nameof(width));
         var grid = EmptyGrid(width, height);
-        for (int y = 0; y < Height; y++)
-            for (int x = 0; x < Width; x++) grid[y, x] = cells[y, x];
+        for (int y = 0; y < Math.Min(Height, height); y++)
+            for (int x = 0; x < Math.Min(Width, width); x++) grid[y, x] = cells[y, x];
         cells = grid;
     }
 

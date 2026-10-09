@@ -12,13 +12,15 @@ Only one mode runs at a time. `Modes/GameMode.cs` defines the common methods for
 | --- | --- |
 | `Modes/HomeMode.cs` | Main menu and scrollable saved-level list. Loading opens a level in the editor. |
 | `Modes/EditorMode.cs` | Paint terrain, place/move/rotate objects, set spawn, edit platform routes, zoom/pan, expand levels, and request saves. |
-| `Modes/PlayMode.cs` | Turn editor data into a playable world, update objects/player, detect touches and completion, and follow the player with the camera. |
+| `Modes/PlayMode.cs` | Open the CSV lobby for normal Play, or build an editor playtest from level data; update objects/player and follow the player with the camera. |
 | `Player.cs` | Movement, gravity, collision, jumping/double jumping, wall sliding/climbing, crouching, animation, and respawning. |
 | `LevelData.cs` | Store terrain, materials, spawn, objects, and routes; validate, load, and save level files. |
 
 ## Building and saving levels
 
-The editor starts with an empty **400 × 80 grid of 8-pixel tiles**. Terrain choices are basic, wall, glass, grass, and ground; these change appearance while remaining solid terrain. Placement checks reject blocked or unsupported objects. If no spawn is chosen, the code looks for clear space above terrain.
+Home → Play and F1 open the lobby from `Content/maps/lobby.csv` using `TileMap` and `floor.png`, with `lobby_collision.csv` providing solid tiles. The player starts near the bottom-left floor at (12, 304). The lobby's stop button returns home. The editor's Play button opens a separate `PlayTest` mode, so editor testing and clear-to-save validation still use the edited level.
+
+The editor starts with an empty **60 × 40 grid of 8-pixel tiles**, matching the debug reference level. Terrain choices are basic, wall, glass, grass, ground, and floor; these change appearance while remaining solid terrain. Placement checks reject blocked or unsupported objects. If no spawn is chosen, the code looks for clear space above terrain.
 
 **Editor → `LevelData.Capture()` → `PlayMode`** creates a separate playtest, so playing does not change the editor's terrain. Saving requires a valid spawn, exit flag, and valid object placements. You must reach the exit during a fresh save playtest; then that captured level is saved as JSON in `Levels/*.uptown`. Returning to the editor cancels the pending save. Loaded levels reuse their original save path.
 
@@ -46,9 +48,9 @@ Deaths reset objects while keeping the active checkpoint.
 
 ## Useful controls
 
-- **Anywhere:** F1 play, F2 editor, F3 home, Esc exit.
+- **Anywhere:** F1 lobby, F2 editor, F3 home, Esc exit.
 - **Play:** WASD/arrows move; Space jumps; hold J to grab/climb walls; S/down crouches; R respawns; K enters either open elevator in a linked pair. Controller input is also supported for movement.
-- **Editor:** choose a palette tool; left-drag paints/places, right-click/drag deletes or erases. P + click sets spawn; R rotates supported objects. Wheel zooms, middle-drag pans, F fits the level. Ctrl+Right/Down expands it; Ctrl+S starts save validation.
+- **Editor:** choose a palette tool; left-drag paints/places, right-click/drag deletes or erases. P + click sets spawn; R rotates supported objects. Wheel zooms, middle-drag pans, F fits the level. Fixed arrows on the right of the viewport add/remove one column; fixed arrows at the bottom add/remove one row. Their width and height each scale between 64 and 96 screen pixels, independent of camera zoom and pan. Ctrl+Left/Right/Up/Down does the same. Shrinking crops the right/bottom edge and is blocked if it would cut off a spawn, object, or moving-platform route. Ctrl+S starts save validation.
 - **Moving routes:** click start and waypoints, double-click or Enter to finish, right-click/Backspace to undo draft points, drag platform ends to resize.
 
 The background palette is currently a placeholder. Start reading `Game1.cs`, then the three mode files, `Player.cs`, and `LevelData.cs`.

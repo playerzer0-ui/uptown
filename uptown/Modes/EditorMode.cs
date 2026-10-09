@@ -106,6 +106,18 @@ public sealed class EditorMode : GameMode, IDisposable
     private Point pointer;
     private const int SidebarWidth = 80;
     private const int ButtonSize = 24;
+    // Resize control limits in actual screen pixels, like CSS min/max width and height.
+    private const int MinResizeButtonWidth = 48;
+    private const int MaxResizeButtonWidth = 384;
+    private const int MinResizeButtonHeight = 48;
+    private const int MaxResizeButtonHeight = 384;
+    public const int DefaultLevelWidth = 60;
+    public const int DefaultLevelHeight = 40;
+    private readonly CollisionRect[] resizeButtons =
+    {
+        new(0, 0, ButtonSize, ButtonSize), new(0, 0, ButtonSize, ButtonSize),
+        new(0, 0, ButtonSize, ButtonSize), new(0, 0, ButtonSize, ButtonSize)
+    };
     private readonly CollisionRect SaveButton;
     private readonly CollisionRect PlayButton;
     private readonly CollisionRect HomeButton;
@@ -172,10 +184,10 @@ public sealed class EditorMode : GameMode, IDisposable
         elevatorSprite = Globals.Content.Load<Texture2D>("graphics/special_objects/elevatoropen");
         pixel = new Texture2D(Globals.graphics.GraphicsDevice, 1, 1);
         pixel.SetData(new[] { Color.White });
-        var blank = new int[80, 400];
-        for (int y = 0; y < 80; y++)
-            for (int x = 0; x < 400; x++) blank[y, x] = -1;
-        preview = new AutoTileMap(TerrainCatalog.Paths(), blank, new int[80, 400]);
+        var blank = new int[DefaultLevelHeight, DefaultLevelWidth];
+        for (int y = 0; y < DefaultLevelHeight; y++)
+            for (int x = 0; x < DefaultLevelWidth; x++) blank[y, x] = -1;
+        preview = new AutoTileMap(TerrainCatalog.Paths(), blank, new int[DefaultLevelHeight, DefaultLevelWidth]);
         background = new BackgroundMap(preview.Width, preview.Height);
         snapshot = Capture();
         camera = new Camera { Origin = Vector2.Zero };
@@ -219,8 +231,10 @@ public sealed class EditorMode : GameMode, IDisposable
         preview.Update(gameTime);
         bool control = Globals.Input.KeyDown(Keys.LeftControl) || Globals.Input.KeyDown(Keys.RightControl);
         if (control && Globals.Input.KeyJustDown(Keys.S)) { SaveLevel(); return; }
-        if (control && Globals.Input.KeyJustDown(Keys.Right)) ExpandLevel(40, 0);
-        if (control && Globals.Input.KeyJustDown(Keys.Down)) ExpandLevel(0, 20);
+        if (control && Globals.Input.KeyJustDown(Keys.Right)) ResizeLevel(1, 0);
+        if (control && Globals.Input.KeyJustDown(Keys.Left)) ResizeLevel(-1, 0);
+        if (control && Globals.Input.KeyJustDown(Keys.Down)) ResizeLevel(0, 1);
+        if (control && Globals.Input.KeyJustDown(Keys.Up)) ResizeLevel(0, -1);
         if (Globals.Input.KeyJustDown(Keys.F)) FitLevel();
         RefreshLayout();
         MouseState mouse = Mouse.GetState();
@@ -228,11 +242,12 @@ public sealed class EditorMode : GameMode, IDisposable
         pointer = new Point((int)MathF.Floor(position.X / uiScale), (int)MathF.Floor(position.Y / uiScale));
         bool clicked = mouse.LeftButton == ButtonState.Pressed && previousMouse.LeftButton == ButtonState.Released;
         bool rightClicked = mouse.RightButton == ButtonState.Pressed && previousMouse.RightButton == ButtonState.Released;
+        if (clicked && HandleResizeButtons(pointer)) { previousMouse = mouse; return; }
         bool overLevel = new Rectangle(sidebarOpen ? SidebarWidth : 0, 0,
             viewWidth - (sidebarOpen ? SidebarWidth : 0), viewHeight).Contains(pointer)
             && !ToggleButton.Contains(pointer) && !SaveButton.Contains(pointer)
             && !PlayButton.Contains(pointer) && !HomeButton.Contains(pointer)
-            && !levelNameInput.Bounds.Contains(pointer);
+            && !levelNameInput.Bounds.Contains(pointer) && !ResizeControlsContain(pointer);
 
         if (mouse.MiddleButton == ButtonState.Released) isPanning = false;
         else if (previousMouse.MiddleButton == ButtonState.Released && overLevel) isPanning = true;
@@ -407,7 +422,7 @@ public sealed class EditorMode : GameMode, IDisposable
         else if (PlayButton.Contains(pointer))
         {
             if (pathDraft != null) showStatus("Double-click the final waypoint to finish the route first.");
-            else switchMode(ModeId.Play);
+            else switchMode(ModeId.PlayTest);
         }
         else if (HomeButton.Contains(pointer)) switchMode(ModeId.Home);
     }
@@ -479,6 +494,7 @@ public sealed class EditorMode : GameMode, IDisposable
         DrawButton(PlayButton, playIcon, new Color(225, 69, 59));
         DrawButton(HomeButton, homeIcon, new Color(149, 213, 112));
         levelNameInput.Draw();
+        DrawResizeControls();
         DrawButton(ToggleButton, arrowIcon, new Color(24, 100, 127),
             effects: sidebarOpen ? SpriteEffects.None : SpriteEffects.FlipHorizontally);
         Globals.spriteBatch.End();
@@ -1231,8 +1247,8 @@ public sealed class EditorMode : GameMode, IDisposable
     private Vector2 ViewCenter()
     {
         float left = (sidebarOpen ? SidebarWidth + 16 : 16) * uiScale;
-        return new Vector2((left + windowWidth - 8 * uiScale) / 2,
-            (36 * uiScale + windowHeight - 8 * uiScale) / 2);
+        return new Vector2((left + windowWidth - 40 * uiScale) / 2,
+            (36 * uiScale + windowHeight - 40 * uiScale) / 2);
     }
 
     public void Dispose() => levelNameInput.Dispose();
@@ -1240,8 +1256,8 @@ public sealed class EditorMode : GameMode, IDisposable
     private void FitLevel()
     {
         float left = (sidebarOpen ? SidebarWidth + 16 : 16) * uiScale;
-        float fit = Math.Min(Math.Max(1, windowWidth - left - 8 * uiScale) / (preview.Width * 8),
-            Math.Max(1, windowHeight - 44 * uiScale) / (preview.Height * 8));
+        float fit = Math.Min(Math.Max(1, windowWidth - left - 40 * uiScale) / (preview.Width * 8),
+            Math.Max(1, windowHeight - 76 * uiScale) / (preview.Height * 8));
         zoomIndex = 0;
         while (zoomIndex < ZoomLevels.Length - 1 && ZoomLevels[zoomIndex + 1] <= fit) zoomIndex++;
         camera.Zoom = ZoomLevels[zoomIndex];
@@ -1250,16 +1266,79 @@ public sealed class EditorMode : GameMode, IDisposable
         lastPaintCell = null;
     }
 
-    private void ExpandLevel(int columns, int rows)
+    private void UpdateResizeButtons()
+    {
+        // Clamp in UI units so the final screen dimensions stay within the configured limits.
+        int Dimension(int minimum, int maximum) => Math.Clamp(ButtonSize,
+            Math.Max(1, (int)MathF.Ceiling(minimum / uiScale)),
+            Math.Max(1, (int)MathF.Floor(maximum / uiScale)));
+        int width = Dimension(MinResizeButtonWidth, MaxResizeButtonWidth);
+        int height = Dimension(MinResizeButtonHeight, MaxResizeButtonHeight);
+        foreach (var button in resizeButtons) button.Resize(width, height);
+        int horizontalSpacing = width / 2 + 2;
+        int verticalSpacing = height / 2 + 2;
+        int right = viewWidth - Math.Max(20, width / 2 + 4);
+        int middleY = (36 + viewHeight - 40) / 2;
+        int bottom = viewHeight - Math.Max(20, height / 2 + 4);
+        int middleX = ((sidebarOpen ? SidebarWidth + 16 : 16) + viewWidth - 40) / 2;
+        resizeButtons[1].UpdateRect(right, middleY - verticalSpacing);
+        resizeButtons[0].UpdateRect(right, middleY + verticalSpacing);
+        resizeButtons[2].UpdateRect(middleX - horizontalSpacing, bottom);
+        resizeButtons[3].UpdateRect(middleX + horizontalSpacing, bottom);
+    }
+
+    private bool ResizeControlsContain(Point point)
+    {
+        UpdateResizeButtons();
+        foreach (var button in resizeButtons)
+            if (button.Contains(point)) return true;
+        return false;
+    }
+
+    private bool HandleResizeButtons(Point point)
+    {
+        UpdateResizeButtons();
+        for (int i = 0; i < resizeButtons.Length; i++)
+        {
+            if (!resizeButtons[i].Contains(point)) continue;
+            ResizeLevel(i == 0 ? -1 : i == 1 ? 1 : 0, i == 2 ? -1 : i == 3 ? 1 : 0);
+            return true;
+        }
+        return false;
+    }
+
+    private void DrawResizeControls()
+    {
+        UpdateResizeButtons();
+        DrawButton(resizeButtons[0], arrowIcon, PicoPallete.dark_green, preview.Width > 2);
+        DrawButton(resizeButtons[1], arrowIcon, PicoPallete.dark_green, effects: SpriteEffects.FlipHorizontally);
+        DrawButton(resizeButtons[2], arrowIcon, PicoPallete.dark_green, preview.Height > 2, rotation: MathHelper.PiOver2);
+        DrawButton(resizeButtons[3], arrowIcon, PicoPallete.dark_green, rotation: -MathHelper.PiOver2);
+    }
+
+    private void ResizeLevel(int columns, int rows)
     {
         try
         {
-            preview.Expand(preview.Width + columns, preview.Height + rows);
-            background.Expand(preview.Width, preview.Height);
+            int width = preview.Width + columns, height = preview.Height + rows;
+            if (width < 2 || height < 2) { showStatus("Level needs at least 2 columns and 2 rows."); return; }
+            Rectangle levelBounds = new(0, 0, width * 8, height * 8);
+            if (spawn.HasValue && !levelBounds.Contains(new Rectangle(spawn.Value.X - 4, spawn.Value.Y - 12, 8, 12)))
+            { showStatus("Move the player spawn inside the smaller level first."); return; }
+            foreach (var item in objects)
+            {
+                if (!levelBounds.Contains(ObjectBounds(new Point(item.X, item.Y), item.Type, item.Direction, item.WidthTiles))
+                    || item.Type == LevelObject.MovingPlatform && item.Waypoints.Exists(point =>
+                        !levelBounds.Contains(MovingPlatform.Bounds(new Point(point.X, point.Y), item.WidthTiles))))
+                { showStatus("Move or delete objects/routes at the edge before shrinking the level."); return; }
+            }
+            preview.Resize(width, height);
+            background.Resize(width, height);
+            CancelDrag();
             snapshot = Capture();
             lastPaintCell = null;
             FitLevel();
-            showStatus($"Level: {preview.Width} x {preview.Height} tiles | Ctrl+Right: wider | Ctrl+Down: taller | F: fit");
+            showStatus($"Level: {preview.Width} x {preview.Height} tiles | Arrows resize by one tile | Ctrl+arrows: resize | F: fit");
         }
         catch (ArgumentOutOfRangeException error) { showStatus(error.Message); }
     }
@@ -1282,7 +1361,7 @@ public sealed class EditorMode : GameMode, IDisposable
     }
 
     private void DrawButton(CollisionRect button, Texture2D icon, Color background, bool enabled = true,
-        SpriteEffects effects = SpriteEffects.None)
+        SpriteEffects effects = SpriteEffects.None, float rotation = 0f)
     {
         Rectangle bounds = button.Rect;
         bool hovered = enabled && button.Contains(pointer);
@@ -1292,7 +1371,7 @@ public sealed class EditorMode : GameMode, IDisposable
         float scale = Math.Min(1f, Math.Min((float)(bounds.Width - 2) / icon.Width,
             (float)(bounds.Height - 2) / icon.Height));
         Globals.spriteBatch.Draw(icon, button.Center, null,
-            enabled ? Color.White : new Color(150, 150, 150), 0,
+            enabled ? Color.White : new Color(150, 150, 150), rotation,
             new Vector2(icon.Width / 2f, icon.Height / 2f), scale, effects, 0);
     }
 }

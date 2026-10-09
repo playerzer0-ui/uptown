@@ -129,6 +129,8 @@ namespace uptown
         public void SwitchMode(ModeId mode)
         {
             if (mode == ModeId.Play && CurrentMode != ModeId.Play)
+                _modes[ModeId.Play] = new PlayMode(() => SwitchMode(ModeId.Home));
+            if (mode == ModeId.PlayTest && CurrentMode != ModeId.PlayTest)
             {
                 var data = ((EditorMode)_modes[ModeId.Editor]).Capture();
                 if (!data.ValidSpawn())
@@ -136,15 +138,15 @@ namespace uptown
                     Window.Title = "Paint a platform first, or set a clear spawn with P + click.";
                     return;
                 }
-                _modes[ModeId.Play] = new PlayMode(data, () => SwitchMode(ModeId.Editor));
+                _modes[ModeId.PlayTest] = new PlayMode(data, () => SwitchMode(ModeId.Editor));
             }
             ActivateMode(mode);
         }
 
         private void StartSaveValidation(LevelData data, Func<bool> saveClearedLevel)
         {
-            _modes[ModeId.Play] = new PlayMode(data, () => SwitchMode(ModeId.Editor), saveClearedLevel);
-            ActivateMode(ModeId.Play);
+            _modes[ModeId.PlayTest] = new PlayMode(data, () => SwitchMode(ModeId.Editor), saveClearedLevel);
+            ActivateMode(ModeId.PlayTest);
             Window.Title = "Clear this level to save it — reach the exit flag | Stop or F2: cancel";
         }
 
@@ -157,7 +159,7 @@ namespace uptown
             CurrentMode = mode;
             _activeMode = next;
             _activeMode.Enter();
-            Window.Title = $"Uptown — {mode} | F1 Play · F2 Editor · F3 Home · Esc Exit";
+            Window.Title = $"Uptown — {(mode == ModeId.Play ? "Lobby" : mode.ToString())} | F1 Lobby · F2 Editor · F3 Home · Esc Exit";
         }
     }
 }

@@ -76,6 +76,14 @@ public sealed class AutoTileMap : Map
     {
         if (width < Width || height < Height || (long)width * height > 1048576)
             throw new System.ArgumentOutOfRangeException(nameof(width), "Expansion must preserve the level and stay within 1,048,576 cells.");
+        Resize(width, height);
+    }
+
+    // Resize from the right/bottom edge, preserving cells and materials in the overlap.
+    public void Resize(int width, int height)
+    {
+        if (width < 1 || height < 1 || (long)width * height > 1048576)
+            throw new ArgumentOutOfRangeException(nameof(width), "Level size must stay within 1,048,576 cells.");
         if (width == Width && height == Height) return;
         var grid = new int[height, width];
         var expandedMaterials = new int[height, width];
