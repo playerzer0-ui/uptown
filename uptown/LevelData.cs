@@ -19,6 +19,8 @@ public sealed class LevelObject
     public const string Spring = "spring";
     public const string Platform = "platform";
     public const string MovingPlatform = "movingplatform";
+    public const string Spike = "spike";
+    public const string Door = "door";
 
     public string Type { get; set; }
     public int X { get; set; }

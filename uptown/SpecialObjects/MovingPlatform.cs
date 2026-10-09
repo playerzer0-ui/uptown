@@ -13,6 +13,8 @@ public sealed class MovingPlatform : SpecialObject
     private readonly Texture2D texture;
     private readonly Path2D path;
     private readonly List<Vector2> route;
+    private readonly List<Spike> mountedSpikes = new();
+    public void AttachSpike(Spike spike) => mountedSpikes.Add(spike);
 
     public MovingPlatform(LevelObject data) : base(new Vector2(data.X, data.Y), Math.Max(3, data.WidthTiles) * 8, Height)
     {
@@ -91,6 +93,11 @@ public sealed class MovingPlatform : SpecialObject
             int pushX = dx > 0 ? next.Right - actor.Left : dx < 0 ? next.Left - actor.Right : 0;
             int pushY = dy > 0 ? next.Bottom - actor.Top : dy < 0 ? next.Top - actor.Bottom : 0;
             player.Transport(this, pushX, pushY);
+        }
+        foreach (var spike in mountedSpikes)
+        {
+            spike.FollowPlatform();
+            if (spike.Touches(player)) { spike.OnPlayerEnter(player); break; }
         }
         return player.RespawnCount == respawns;
     }

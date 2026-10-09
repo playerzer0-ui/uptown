@@ -140,6 +140,18 @@
 /processorParam:TextureFormat=Color
 /build:graphics/special_objects/checkpoint.png
 
+#begin graphics/special_objects/door.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:graphics/special_objects/door.png;graphics/special_objects/door
+
 #begin graphics/special_objects/exit_flag.png
 /importer:TextureImporter
 /processor:TextureProcessor
@@ -175,6 +187,18 @@
 /processorParam:MakeSquare=False
 /processorParam:TextureFormat=Color
 /build:graphics/special_objects/platform.png;graphics/special_objects/platform
+
+#begin graphics/special_objects/spike.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:graphics/special_objects/spike.png;graphics/special_objects/spike
 
 #begin graphics/special_objects/spring.png
 /importer:TextureImporter

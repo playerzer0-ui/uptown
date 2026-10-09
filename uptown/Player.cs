@@ -22,6 +22,7 @@ public class Player
     private const float WallJumpSpeed = 110f;
     private readonly CollisionMap map;
     private readonly List<Platform> platforms;
+    private readonly List<Door> doors;
     private readonly List<MovingPlatform> movingPlatforms;
     private MovingPlatform ignoredMovingPlatform;
     private readonly HashSet<int> ignoredPlatformTops = new();
@@ -65,10 +66,11 @@ public class Player
     public event Action Respawned;
     public int RespawnCount { get; private set; }
 
-    public Player(CollisionMap map, Vector2 spawn, List<Platform> platforms = null, List<MovingPlatform> movingPlatforms = null)
+    public Player(CollisionMap map, Vector2 spawn, List<Platform> platforms = null, List<MovingPlatform> movingPlatforms = null, List<Door> doors = null)
     {
         this.map = map;
         this.platforms = platforms ?? new List<Platform>();
+        this.doors = doors ?? new List<Door>();
         this.movingPlatforms = movingPlatforms ?? new List<MovingPlatform>();
         Spawn = spawn;
         Position = spawn;
@@ -115,7 +117,7 @@ public class Player
             SetCrouching(true);
         else if (IsCrouching)
             TryStand();
-        Platform support = SupportingPlatform();
+        SpecialObject support = SupportingPlatform();
         platformCrouchTime = IsGrounded && IsCrouching && moveY > 0 && support != null
             ? platformCrouchTime + dt : 0;
         if (platformCrouchTime >= 0.3f)
@@ -330,9 +332,14 @@ public class Player
             foreach (var platform in movingPlatforms)
                 if (platform != ignoredMovingPlatform && platform.Collider.Rect.Intersects(Collider.Rect)) return true;
             if (dx == 0 && dy > 0)
+            {
                 foreach (var platform in platforms)
                     if (!ignoredPlatformTops.Contains(platform.Collider.Rect.Top)
                         && Platform.BlocksDownward(before, Collider.Rect, platform.Collider.Rect)) return true;
+                foreach (var door in doors)
+                    if (door.Opened && !ignoredPlatformTops.Contains(door.TopCollider.Rect.Top)
+                        && Platform.BlocksDownward(before, Collider.Rect, door.TopCollider.Rect)) return true;
+            }
             return false;
         }
         finally
@@ -341,13 +348,19 @@ public class Player
         }
     }
 
-    private Platform SupportingPlatform()
+    private SpecialObject SupportingPlatform()
     {
         foreach (var platform in platforms)
         {
             Rectangle bounds = platform.Collider.Rect;
             if (!ignoredPlatformTops.Contains(bounds.Top) && Collider.Rect.Bottom == bounds.Top
                 && Collider.Rect.Right > bounds.Left && Collider.Rect.Left < bounds.Right) return platform;
+        }
+        foreach (var door in doors)
+        {
+            Rectangle bounds = door.TopCollider.Rect;
+            if (door.Opened && !ignoredPlatformTops.Contains(bounds.Top) && Collider.Rect.Bottom == bounds.Top
+                && Collider.Rect.Right > bounds.Left && Collider.Rect.Left < bounds.Right) return door;
         }
         return null;
     }
@@ -394,6 +407,8 @@ public class Player
             pixels -= step;
         }
     }
+
+    public void Die() => Respawn();
 
     private void Respawn()
     {

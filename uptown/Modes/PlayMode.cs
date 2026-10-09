@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Collections.Generic;
 using System.IO;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -44,6 +45,7 @@ public sealed class PlayMode : GameMode
         stopIcon = Globals.Content.Load<Texture2D>("graphics/ui/stop");
         PlatformLayout.Rebuild(level.Objects, PlatformLayout.Cells(level.Objects), level.Width, level.Height,
             (x, y) => x >= 0 && y >= 0 && x < level.Width && y < level.Height && level.Terrain[y][x] == 1);
+        var movingMounts = new Dictionary<LevelObject, MovingPlatform>();
         foreach (var item in level.Objects)
         {
             var feet = new Vector2(item.X, item.Y);
@@ -51,7 +53,13 @@ public sealed class PlayMode : GameMode
             else if (item.Type == LevelObject.ExitFlag) entities.Add(new ExitFlag(feet, item.Direction));
             else if (item.Type == LevelObject.BounceBall) entities.Add(new BounceBall(feet, item.Direction));
             else if (item.Type == LevelObject.Spring) entities.Add(new Spring(feet, item.Direction));
-            else if (item.Type == LevelObject.MovingPlatform) entities.Add(new MovingPlatform(item));
+            else if (item.Type == LevelObject.Door && Door.Supported(new Point(item.X, item.Y), tileMap.Occupied)) entities.Add(new Door(feet));
+            else if (item.Type == LevelObject.MovingPlatform)
+            {
+                var platform = new MovingPlatform(item);
+                movingMounts.Add(item, platform);
+                entities.Add(platform);
+            }
             else if (item.Type == LevelObject.Platform)
             {
                 var bounds = Platform.Bounds(new Point(item.X, item.Y), item.WidthTiles);
@@ -60,8 +68,16 @@ public sealed class PlayMode : GameMode
                     tileMap.Occupied(bounds.Right / 8, bounds.Top / 8)));
             }
         }
+        foreach (var item in level.Objects)
+        {
+            if (item.Type != LevelObject.Spike || !Spike.Supported(new Point(item.X, item.Y), item.Direction, tileMap.Occupied, level.Objects)) continue;
+            var support = Spike.SupportingObject(new Point(item.X, item.Y), item.Direction, level.Objects);
+            MovingPlatform mount = null;
+            if (support != null) movingMounts.TryGetValue(support, out mount);
+            entities.Add(new Spike(new Vector2(item.X, item.Y), item.Direction, mount));
+        }
         player = new Player(collisions, new Vector2(level.SpawnX, level.SpawnY), entities.OfType<Platform>().ToList(),
-            entities.OfType<MovingPlatform>().ToList());
+            entities.OfType<MovingPlatform>().ToList(), entities.OfType<Door>().ToList());
         collisionMap = collisions;
         player.Respawned += () => resetPending = true;
         RefreshLayout();
@@ -89,6 +105,7 @@ public sealed class PlayMode : GameMode
         entities.Update(gameTime);
         if (levelComplete) return;
         TouchSpecialObjects();
+        if (ResetAfterDeath()) { UpdateCamera(); return; }
         UpdateCamera();
         CheckCompletion();
     }
@@ -174,10 +191,11 @@ public sealed class PlayMode : GameMode
     private void TouchSpecialObjects()
     {
         // Copy first: a hook may remove its object (e.g. a broken block).
-        foreach (var special in entities.OfType<SpecialObject>().ToList())
+        foreach (var special in entities.OfType<SpecialObject>().OrderBy(special => special is Spike ? 0 : 1).ToList())
         {
             bool inside = special.Touches(player);
             if (inside && !special.PlayerInside) special.OnPlayerEnter(player);
+            if (resetPending) return;
             if (inside) special.OnPlayerStay(player);
             if (!inside && special.PlayerInside) special.OnPlayerExit(player);
             special.PlayerInside = inside;

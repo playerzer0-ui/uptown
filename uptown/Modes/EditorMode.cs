@@ -21,9 +21,11 @@ public sealed class EditorMode : GameMode
     public LevelData Capture()
     {
         PlatformLayout.Rebuild(objects, PlatformLayout.Cells(objects), preview.Width, preview.Height, preview.Occupied);
+        objects.RemoveAll(item => item.Type == LevelObject.Spike
+            && !Spike.Supported(new Point(item.X, item.Y), item.Direction, preview.Occupied, objects));
         return LevelData.Capture(preview, spawn, objects);
     }
-    private enum Tool { None, Terrain, Spawn, Checkpoint, Exit, BounceBall, Spring, Platform, MovingPlatform }
+    private enum Tool { None, Terrain, Spawn, Checkpoint, Exit, BounceBall, Spring, Platform, MovingPlatform, Spike, Door }
     private enum Palette { Terrain, Special, Sprites, Background }
     private Palette palette;
     private readonly Texture2D[] bars;
@@ -37,6 +39,8 @@ public sealed class EditorMode : GameMode
     private readonly CollisionRect SpringButton = new(48, 52, 27, 27);
     private readonly CollisionRect PlatformButton = new(16, 83, 27, 27);
     private readonly CollisionRect MovingPlatformButton = new(48, 83, 27, 27);
+    private readonly CollisionRect SpikeButton = new(16, 114, 27, 27);
+    private readonly CollisionRect DoorButton = new(48, 114, 27, 27);
     private LevelObject pathDraft;
     private LevelObject pathOriginal;
     private LevelObject resizingPlatform;
@@ -80,6 +84,8 @@ public sealed class EditorMode : GameMode
     private readonly Texture2D springSprite;
     private readonly Texture2D platformSprite;
     private readonly Texture2D movingPlatformSprite;
+    private readonly Texture2D spikeSprite;
+    private readonly Texture2D doorSprite;
     private readonly Texture2D pixel;
     private readonly Camera camera;
     private bool isPanning;
@@ -133,6 +139,8 @@ public sealed class EditorMode : GameMode
         springSprite = Globals.Content.Load<Texture2D>("graphics/special_objects/spring");
         platformSprite = Globals.Content.Load<Texture2D>("graphics/special_objects/platform");
         movingPlatformSprite = Globals.Content.Load<Texture2D>("graphics/special_objects/moving_platform");
+        spikeSprite = Globals.Content.Load<Texture2D>("graphics/special_objects/spike");
+        doorSprite = Globals.Content.Load<Texture2D>("graphics/special_objects/door");
         pixel = new Texture2D(Globals.graphics.GraphicsDevice, 1, 1);
         pixel.SetData(new[] { Color.White });
         var blank = new int[80, 400];
@@ -254,7 +262,7 @@ public sealed class EditorMode : GameMode
             return;
         }
         // Spawn, checkpoint and exit tools: press on the level, drag the ghost around, release to drop it.
-        if (tool is Tool.Spawn or Tool.Checkpoint or Tool.Exit or Tool.BounceBall or Tool.Spring)
+        if (tool is Tool.Spawn or Tool.Checkpoint or Tool.Exit or Tool.BounceBall or Tool.Spring or Tool.Spike or Tool.Door)
         {
             bool held = mouse.LeftButton == ButtonState.Pressed;
             if (held && (ghost.HasValue || ((clicked || draggingFromPalette) && overLevel)))
@@ -271,7 +279,7 @@ public sealed class EditorMode : GameMode
                 var cell = SpawnCellAt(position);
                 // Special sprites are 16px wide: center on a tile boundary so their
                 // left/right edges align with the 8px grid instead of spanning three columns.
-                if (tool != Tool.Spawn) cell.X += 4;
+                if (tool != Tool.Spawn && tool != Tool.Spike && tool != Tool.Door) cell.X += 4;
                 ghost = cell;
                 ghostDirection = bounceDirection;
                 if (tool == Tool.Spring && !manualSpringDirection)
@@ -511,7 +519,9 @@ public sealed class EditorMode : GameMode
         if (tool == Tool.Spawn) { TrySetSpawn(feet); return; }
         if (!ghostValid)
         {
-            showStatus(tool == Tool.Spring
+            showStatus(tool == Tool.Door ? "Door needs terrain directly above and below its doorway."
+                : tool == Tool.Spike ? "Spike needs terrain, the top of a platform, or a solid moving-platform side behind its base."
+                : tool == Tool.Spring
                 ? "Spring needs clear space and solid terrain across its mounting base."
                 : "Object needs clear space inside the level and can't share a spot.");
             return;
@@ -535,6 +545,7 @@ public sealed class EditorMode : GameMode
     private static Rectangle ObjectBounds(Point feet, string type, BounceDirection direction, int widthTiles, bool collision = false) =>
         type == LevelObject.Platform ? Platform.Bounds(feet, widthTiles)
             : type == LevelObject.MovingPlatform ? MovingPlatform.Bounds(feet, widthTiles)
+            : type == LevelObject.Door ? Door.Bounds(feet)
             : ObjectRotation.Bounds(feet, type, direction, collision);
 
     private bool MovingPointFits(Point feet, LevelObject ignore, int widthTiles = 3)
@@ -710,11 +721,13 @@ public sealed class EditorMode : GameMode
         Tool.Spring => LevelObject.Spring,
         Tool.Platform => LevelObject.Platform,
         Tool.MovingPlatform => LevelObject.MovingPlatform,
+        Tool.Spike => LevelObject.Spike,
+        Tool.Door => LevelObject.Door,
         Tool.Exit => LevelObject.ExitFlag,
         _ => LevelObject.Checkpoint
     };
 
-    private bool IsSpecialTool() => tool is Tool.Checkpoint or Tool.Exit or Tool.BounceBall or Tool.Spring or Tool.Platform or Tool.MovingPlatform;
+    private bool IsSpecialTool() => tool is Tool.Checkpoint or Tool.Exit or Tool.BounceBall or Tool.Spring or Tool.Platform or Tool.MovingPlatform or Tool.Spike or Tool.Door;
 
     private void RotateObject(Vector2 screen, bool overLevel)
     {
@@ -727,7 +740,7 @@ public sealed class EditorMode : GameMode
                 var item = objects[i];
                 var feet = new Point(item.X, item.Y);
                 if (!ObjectBounds(feet, item.Type, item.Direction, item.WidthTiles).Contains(world)) continue;
-                if (item.Type is LevelObject.Platform or LevelObject.MovingPlatform) return;
+                if (item.Type is LevelObject.Platform or LevelObject.MovingPlatform or LevelObject.Door) return;
                 var next = ObjectRotation.Next(item.Type, item.Direction);
                 if (!ObjectFits(feet, item.Type, item, next))
                 {
@@ -740,7 +753,7 @@ public sealed class EditorMode : GameMode
                 return;
             }
         }
-        if (!IsSpecialTool() || tool is Tool.Platform or Tool.MovingPlatform) return;
+        if (!IsSpecialTool() || tool is Tool.Platform or Tool.MovingPlatform or Tool.Door) return;
         bounceDirection = ObjectRotation.Next(SelectedObjectType(), bounceDirection);
         ghostDirection = bounceDirection;
         if (tool == Tool.Spring) manualSpringDirection = true;
@@ -758,6 +771,7 @@ public sealed class EditorMode : GameMode
         LevelObject.Spring => springSprite,
         LevelObject.Platform => platformSprite,
         LevelObject.MovingPlatform => movingPlatformSprite,
+        LevelObject.Spike => spikeSprite,
         LevelObject.ExitFlag => exitSprite,
         _ => checkpointSprite
     };
@@ -832,7 +846,9 @@ public sealed class EditorMode : GameMode
         for (int y = bounds.Top / 8; y <= (bounds.Bottom - 1) / 8; y++)
             for (int x = bounds.Left / 8; x <= (bounds.Right - 1) / 8; x++)
                 if (preview.Occupied(x, y)) return false;
+        if (type == LevelObject.Door && !Door.Supported(feet, preview.Occupied)) return false;
         if (type == LevelObject.Spring && !SpringSupported(feet, direction)) return false;
+        if (type == LevelObject.Spike && !Spike.Supported(feet, direction, preview.Occupied, objects)) return false;
         foreach (var item in objects)
         {
             if (item == ignore || (type == LevelObject.ExitFlag && item.Type == LevelObject.ExitFlag)) continue;
@@ -844,6 +860,20 @@ public sealed class EditorMode : GameMode
     // First frame of the object's sprite at its feet; blocked spots are tinted red.
     private void DrawObject(string type, Point feet, bool valid, float alpha, BounceDirection direction = BounceDirection.Up, int widthTiles = 6)
     {
+        if (type == LevelObject.Door)
+        {
+            Globals.spriteBatch.Draw(doorSprite, feet.ToVector2(), new Rectangle(0, 0, 16, 16),
+                (valid ? Color.White : new Color(255, 120, 120)) * alpha, 0, new Vector2(4, 16), 1f, SpriteEffects.None, 0);
+            return;
+        }
+        if (type == LevelObject.Spike)
+        {
+            var bounds = ObjectRotation.Bounds(feet, type, direction);
+            Globals.spriteBatch.Draw(spikeSprite, bounds.Center.ToVector2(), null,
+                (valid ? Color.White : new Color(255, 120, 120)) * alpha,
+                ObjectRotation.Angle(direction), new Vector2(4, 4), 1f, SpriteEffects.None, 0);
+            return;
+        }
         if (type == LevelObject.MovingPlatform)
         {
             var bounds = MovingPlatform.Bounds(feet, widthTiles);
@@ -901,6 +931,8 @@ public sealed class EditorMode : GameMode
         if (palette == Palette.Special && SpringButton.Contains(point)) return Tool.Spring;
         if (palette == Palette.Special && PlatformButton.Contains(point)) return Tool.Platform;
         if (palette == Palette.Special && MovingPlatformButton.Contains(point)) return Tool.MovingPlatform;
+        if (palette == Palette.Special && SpikeButton.Contains(point)) return Tool.Spike;
+        if (palette == Palette.Special && DoorButton.Contains(point)) return Tool.Door;
         return Tool.None;
     }
 
@@ -918,7 +950,7 @@ public sealed class EditorMode : GameMode
             Globals.spriteBatch.Draw(bars[i], tab, tab, Color.White);
             if (tab.Contains(pointer)) Fill(tab, Color.White * 0.12f);
         }
-        for (int row = 0; row < 3; row++)
+        for (int row = 0; row < (palette == Palette.Special ? 4 : 3); row++)
             for (int col = 0; col < 2; col++)
             {
                 var slot = new Rectangle(3 + col * 32, 8 + row * 31, 27, 27);
@@ -946,6 +978,8 @@ public sealed class EditorMode : GameMode
             DrawPaletteItem(springSprite, new Rectangle(0, 0, 16, 16), SpringButton.Rect);
             DrawPaletteItem(platformSprite, new Rectangle(24, 0, 8, 8), PlatformButton.Rect);
             DrawPaletteItem(movingPlatformSprite, new Rectangle(0, 0, 24, 8), MovingPlatformButton.Rect);
+            DrawPaletteItem(spikeSprite, new Rectangle(0, 0, 8, 8), SpikeButton.Rect);
+            DrawPaletteItem(doorSprite, new Rectangle(0, 0, 16, 16), DoorButton.Rect);
         }
     }
 
