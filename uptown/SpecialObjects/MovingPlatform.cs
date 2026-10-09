@@ -84,11 +84,11 @@ public sealed class MovingPlatform : SpecialObject
         Rectangle next = before;
         next.Offset(dx, dy);
         if (terrain.CheckCollision(next)) { path.IsActive = false; return false; }
-        bool rider = player.Rides(before) || player.Grabs(before);
+        bool rider = !player.IsInElevator && (player.Rides(before) || player.Grabs(before));
         Position += new Vector2(dx, dy);
         Collider.Translate(dx, dy);
         if (rider) player.Transport(this, dx, dy);
-        else if (next.Intersects(player.Collider.Rect))
+        else if (!player.IsInElevator && next.Intersects(player.Collider.Rect))
         {
             Rectangle actor = player.Collider.Rect;
             int pushX = dx > 0 ? next.Right - actor.Left : dx < 0 ? next.Left - actor.Right : 0;
@@ -99,7 +99,7 @@ public sealed class MovingPlatform : SpecialObject
         foreach (var spike in mountedSpikes)
         {
             spike.FollowPlatform();
-            if (spike.Touches(player)) { spike.OnPlayerEnter(player); break; }
+            if (!player.IsInElevator && spike.Touches(player)) { spike.OnPlayerEnter(player); break; }
         }
         return !player.IsDead && player.RespawnCount == respawns;
     }

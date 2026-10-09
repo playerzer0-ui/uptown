@@ -67,6 +67,7 @@ public class Player
     public event Action<Vector2> Died;
     public const float DeathDuration = 0.45f;
     public bool IsDead { get; private set; }
+    public bool IsInElevator { get; private set; }
     private float deathTime;
     public int RespawnCount { get; private set; }
 
@@ -102,6 +103,7 @@ public class Player
             return;
         }
         var input = Globals.Input;
+        if (IsInElevator) return;
         if (input.JustPressed("Respawn")) { Die(); return; }
         bool jumpPressed = input.JustPressed("Jump");
         recentJumpPress = jumpPressed ? PerfectBounceWindow : Math.Max(0, recentJumpPress - dt);
@@ -390,7 +392,7 @@ public class Player
 
     public bool Grabs(Rectangle platform)
     {
-        if (!IsClimbing) return false;
+        if (!IsClimbing || IsInElevator) return false;
         int x = facing > 0 ? Collider.Rect.Right : Collider.Rect.Left - 1;
         return platform.Intersects(new Rectangle(x, Collider.Rect.Top + 3, 1, Math.Max(1, Collider.Rect.Height - 6)));
     }
@@ -429,6 +431,7 @@ public class Player
 
     private void Respawn()
     {
+        IsInElevator = false;
         IsDead = false;
         deathTime = 0;
         ignoredPlatformTops.Clear();
@@ -477,12 +480,12 @@ public class Player
     }
 
     public bool Rides(Rectangle platform) => velocity.Y >= 0 && Collider.Rect.Bottom == platform.Top
-        && !IsDead && Collider.Rect.Right > platform.Left && Collider.Rect.Left < platform.Right;
+        && !IsDead && !IsInElevator && Collider.Rect.Right > platform.Left && Collider.Rect.Left < platform.Right;
 
     // Platform motion uses whole pixels and keeps voluntary movement remainders intact.
     public void Transport(MovingPlatform platform, int dx, int dy)
     {
-        if (IsDead) return;
+        if (IsDead || IsInElevator) return;
         ignoredMovingPlatform = platform;
         try
         {
@@ -511,11 +514,37 @@ public class Player
 
     public void Draw()
     {
-        if (IsDead) return;
+        if (IsDead || IsInElevator) return;
         animation.Position = Position;
         animation.Stretch = visualStretch;
         animation.SpriteEffect = facing < 0 ? SpriteEffects.FlipHorizontally : SpriteEffects.None;
         animation.Draw();
         //Collider.Draw(Color.Red * 0.5f);
+    }
+
+    public void BeginElevatorTravel(Vector2 feet)
+    {
+        IsInElevator = true;
+        SetCrouching(false);
+        TeleportTo(feet);
+    }
+
+    public void TeleportTo(Vector2 feet)
+    {
+        Position = feet;
+        velocity = remainder = Vector2.Zero;
+        SyncCollider();
+    }
+
+    public void EndElevatorTravel()
+    {
+        IsInElevator = false;
+        coyoteTime = wallJumpTime = jumpBuffer = jumpHoldTime = recentJumpPress = bounceBoostWindow = 0;
+        platformCrouchTime = 0;
+        ignoredPlatformTops.Clear();
+        isClimbHopping = isClimbJumping = false;
+        IsClimbing = IsWallSliding = IsGrounded = false;
+        airJumpAvailable = true;
+        visualStretch = Vector2.One;
     }
 }

@@ -33,7 +33,7 @@ public sealed class EditorMode : GameMode, IDisposable
             && !Spike.Supported(new Point(item.X, item.Y), item.Direction, preview.Occupied, objects));
         return LevelData.Capture(preview, spawn, objects, background);
     }
-    private enum Tool { None, Terrain, Background, Spawn, Checkpoint, Exit, BounceBall, Spring, Platform, MovingPlatform, Spike, Door, Lightstick }
+    private enum Tool { None, Terrain, Background, Spawn, Checkpoint, Exit, BounceBall, Spring, Platform, MovingPlatform, Spike, Door, Lightstick, Elevator }
     private enum Palette { Terrain, Special, Sprites, Background, Decoration }
     private Palette palette;
     private readonly Texture2D[] bars;
@@ -50,6 +50,7 @@ public sealed class EditorMode : GameMode, IDisposable
     private readonly CollisionRect SpikeButton = new(16, 114, 27, 27);
     private readonly CollisionRect DoorButton = new(48, 114, 27, 27);
     private readonly CollisionRect LightstickButton = new(16, 21, 27, 27);
+    private readonly CollisionRect ElevatorButton = new(16, 145, 27, 27);
     private LevelObject pathDraft;
     private LevelObject pathOriginal;
     private LevelObject resizingPlatform;
@@ -96,6 +97,7 @@ public sealed class EditorMode : GameMode, IDisposable
     private readonly Texture2D spikeSprite;
     private readonly Texture2D doorSprite;
     private readonly Texture2D lightstickSprite;
+    private readonly Texture2D elevatorSprite;
     private readonly Texture2D pixel;
     private readonly Camera camera;
     private bool isPanning;
@@ -167,6 +169,7 @@ public sealed class EditorMode : GameMode, IDisposable
         spikeSprite = Globals.Content.Load<Texture2D>("graphics/special_objects/spike");
         doorSprite = Globals.Content.Load<Texture2D>("graphics/special_objects/door");
         lightstickSprite = Globals.Content.Load<Texture2D>("graphics/decoration/lightstick");
+        elevatorSprite = Globals.Content.Load<Texture2D>("graphics/special_objects/elevatoropen");
         pixel = new Texture2D(Globals.graphics.GraphicsDevice, 1, 1);
         pixel.SetData(new[] { Color.White });
         var blank = new int[80, 400];
@@ -289,6 +292,7 @@ public sealed class EditorMode : GameMode, IDisposable
                         showStatus("Background: " + BackgroundMap.Names[selectedBackground] + " | Left-drag: paint | Right-drag: erase");
                     }
                     if (tool == Tool.Lightstick) showStatus("Lightstick | Place on a background tile | Drag to move | Right-click: delete");
+                    if (tool == Tool.Elevator) showStatus("Elevator | Place a linked pair | Drag either door | Right-click: delete pair | Play: K at either door");
                     draggingFromPalette = tool != Tool.Background && tool != Tool.Terrain && tool != Tool.Platform && tool != Tool.MovingPlatform;
                     if (IsSpecialTool()) showStatus(tool == Tool.Platform
                         ? "Platform | Drag to paint horizontally from terrain | Right-drag: erase"
@@ -311,7 +315,7 @@ public sealed class EditorMode : GameMode, IDisposable
             return;
         }
         // Spawn, checkpoint and exit tools: press on the level, drag the ghost around, release to drop it.
-        if (tool is Tool.Spawn or Tool.Checkpoint or Tool.Exit or Tool.BounceBall or Tool.Spring or Tool.Spike or Tool.Door or Tool.Lightstick)
+        if (tool is Tool.Spawn or Tool.Checkpoint or Tool.Exit or Tool.BounceBall or Tool.Spring or Tool.Spike or Tool.Door or Tool.Lightstick or Tool.Elevator)
         {
             bool held = mouse.LeftButton == ButtonState.Pressed;
             if (held && (ghost.HasValue || ((clicked || draggingFromPalette) && overLevel)))
@@ -355,7 +359,8 @@ public sealed class EditorMode : GameMode, IDisposable
                 var target = ObjectUnder(position, SelectedObjectType());
                 if (target != null)
                 {
-                    objects.Remove(target);
+                    if (target.Type == LevelObject.Elevator) objects.RemoveAll(item => item.Type == LevelObject.Elevator && item.PairId == target.PairId);
+                    else objects.Remove(target);
                     snapshot = Capture();
                 }
                 return;
@@ -431,6 +436,7 @@ public sealed class EditorMode : GameMode, IDisposable
             if (item.Type == LevelObject.MovingPlatform)
                 MovingPlatform.DrawRoute(MovingPlatform.Route(item), Color.White * (dragged ? 0.35f : 1f) * ForegroundOpacity);
         }
+        DrawElevatorConnections();
         if (pathDraft != null)
         {
             DrawObject(LevelObject.MovingPlatform, new Point(pathDraft.X, pathDraft.Y), true, 0.8f, widthTiles: pathDraft.WidthTiles);
@@ -502,6 +508,7 @@ public sealed class EditorMode : GameMode, IDisposable
     {
         if (pathDraft != null) { showStatus("Double-click the final waypoint to finish the route first."); return; }
         var data = Capture();
+        if (!Elevator.ValidPairs(data.Objects)) { showStatus("Cannot save: each elevator needs a linked source and destination."); return; }
         if (!data.Objects.Exists(item => item.Type == LevelObject.ExitFlag))
         {
             showStatus("Cannot save: place an exit flag first.");
@@ -595,6 +602,16 @@ public sealed class EditorMode : GameMode, IDisposable
             objects.RemoveAll(item => item.Type == LevelObject.ExitFlag);
             objects.Add(new LevelObject { Type = LevelObject.ExitFlag, X = feet.X, Y = feet.Y, Direction = ghostDirection });
         }
+        else if (tool == Tool.Elevator && moving == null)
+        {
+            Point? destination = FindElevatorDestination(feet);
+            if (!destination.HasValue) { showStatus("Elevator pair needs room for a second door nearby. Clear space first."); return; }
+            string pairId = Guid.NewGuid().ToString("N");
+            objects.Add(new LevelObject { Type = LevelObject.Elevator, X = feet.X, Y = feet.Y, PairId = pairId });
+            objects.Add(new LevelObject { Type = LevelObject.Elevator, X = destination.Value.X, Y = destination.Value.Y,
+                PairId = pairId, IsDestination = true });
+            showStatus("Elevator pair created | Purple arrows connect both doors | Play: K at either door | Drag either door to move it");
+        }
         else if (moving != null)
         {
             moving.X = feet.X;
@@ -603,6 +620,56 @@ public sealed class EditorMode : GameMode, IDisposable
         }
         else objects.Add(new LevelObject { Type = SelectedObjectType(), X = feet.X, Y = feet.Y, Direction = ghostDirection });
         snapshot = Capture();
+    }
+
+    private Point? FindElevatorDestination(Point source)
+    {
+        Rectangle sourceBounds = Elevator.Bounds(source);
+        bool Fits(Point candidate) => !sourceBounds.Intersects(Elevator.Bounds(candidate))
+            && ObjectFits(candidate, LevelObject.Elevator, null);
+        foreach (int offset in new[] { 32, -32 })
+        {
+            Point candidate = new(source.X + offset, source.Y);
+            if (Fits(candidate)) return candidate;
+        }
+        for (int radius = 2; radius <= 16; radius++)
+            for (int dy = -radius; dy <= radius; dy++)
+                for (int dx = -radius; dx <= radius; dx++)
+                {
+                    if (Math.Abs(dx) != radius && Math.Abs(dy) != radius) continue;
+                    Point candidate = new(source.X + dx * 8, source.Y + dy * 8);
+                    if (Fits(candidate)) return candidate;
+                }
+        return null;
+    }
+
+    private void DrawElevatorConnections()
+    {
+        foreach (var source in objects)
+        {
+            if (source.Type != LevelObject.Elevator || source.IsDestination) continue;
+            var destination = objects.Find(item => item.Type == LevelObject.Elevator && item.PairId == source.PairId && item.IsDestination);
+            if (destination == null) continue;
+            Point SourceFeet(LevelObject item) => item == moving && ghost.HasValue ? ghost.Value : new Point(item.X, item.Y);
+            Vector2 from = Elevator.Connector(SourceFeet(source)), to = Elevator.Connector(SourceFeet(destination));
+            Vector2 delta = to - from;
+            if (delta.LengthSquared() == 0) continue;
+            void Line(Vector2 a, Vector2 b)
+            {
+                Vector2 difference = b - a;
+                Globals.spriteBatch.Draw(pixel, a, null, PicoPallete.lavender,
+                    MathF.Atan2(difference.Y, difference.X), Vector2.Zero,
+                    new Vector2(difference.Length(), Math.Max(1f, 1f / camera.Zoom)), SpriteEffects.None, 0);
+            }
+            Line(from, to);
+            Vector2 direction = Vector2.Normalize(delta), normal = new(-direction.Y, direction.X);
+            Vector2 arrow = Vector2.Lerp(from, to, 0.65f);
+            Line(arrow - direction * 5 + normal * 3, arrow);
+            Line(arrow - direction * 5 - normal * 3, arrow);
+            Vector2 reverseArrow = Vector2.Lerp(from, to, 0.35f);
+            Line(reverseArrow + direction * 5 + normal * 3, reverseArrow);
+            Line(reverseArrow + direction * 5 - normal * 3, reverseArrow);
+        }
     }
 
     private static Rectangle ObjectBounds(Point feet, string type, BounceDirection direction, int widthTiles, bool collision = false) =>
@@ -787,6 +854,7 @@ public sealed class EditorMode : GameMode, IDisposable
         Tool.Spike => LevelObject.Spike,
         Tool.Door => LevelObject.Door,
         Tool.Lightstick => LevelObject.Lightstick,
+        Tool.Elevator => LevelObject.Elevator,
         Tool.Exit => LevelObject.ExitFlag,
         _ => LevelObject.Checkpoint
     };
@@ -804,7 +872,7 @@ public sealed class EditorMode : GameMode, IDisposable
                 var item = objects[i];
                 var feet = new Point(item.X, item.Y);
                 if (!ObjectBounds(feet, item.Type, item.Direction, item.WidthTiles).Contains(world)) continue;
-                if (item.Type is LevelObject.Platform or LevelObject.MovingPlatform or LevelObject.Door or LevelObject.Lightstick) return;
+                if (item.Type is LevelObject.Platform or LevelObject.MovingPlatform or LevelObject.Door or LevelObject.Lightstick or LevelObject.Elevator) return;
                 var next = ObjectRotation.Next(item.Type, item.Direction);
                 if (!ObjectFits(feet, item.Type, item, next))
                 {
@@ -917,6 +985,8 @@ public sealed class EditorMode : GameMode, IDisposable
         foreach (var item in objects)
         {
             if (item == ignore || (type == LevelObject.ExitFlag && item.Type == LevelObject.ExitFlag)) continue;
+            if ((type == LevelObject.Elevator || item.Type == LevelObject.Elevator)
+                && ObjectBounds(new Point(item.X, item.Y), item.Type, item.Direction, item.WidthTiles, true).Intersects(bounds)) return false;
             if (item.X == feet.X && item.Y == feet.Y) return false;
         }
         return true;
@@ -926,6 +996,12 @@ public sealed class EditorMode : GameMode, IDisposable
     private void DrawObject(string type, Point feet, bool valid, float alpha, BounceDirection direction = BounceDirection.Up, int widthTiles = 6)
     {
         alpha *= ForegroundOpacity;
+        if (type == LevelObject.Elevator)
+        {
+            Globals.spriteBatch.Draw(elevatorSprite, Elevator.Bounds(feet), new Rectangle(0, 0, 16, 24),
+                (valid ? Color.White : new Color(255, 120, 120)) * alpha);
+            return;
+        }
         if (type == LevelObject.Lightstick)
         {
             if (valid) Lightstick.DrawGlow(feet.ToVector2(), alpha);
@@ -1017,6 +1093,7 @@ public sealed class EditorMode : GameMode, IDisposable
         if (palette == Palette.Special && MovingPlatformButton.Contains(point)) return Tool.MovingPlatform;
         if (palette == Palette.Special && SpikeButton.Contains(point)) return Tool.Spike;
         if (palette == Palette.Special && DoorButton.Contains(point)) return Tool.Door;
+        if (palette == Palette.Special && ElevatorButton.Contains(point)) return Tool.Elevator;
         return Tool.None;
     }
 
@@ -1034,7 +1111,7 @@ public sealed class EditorMode : GameMode, IDisposable
             Globals.spriteBatch.Draw(bars[i], tab, tab, Color.White);
             if (tab.Contains(pointer)) Fill(tab, Color.White * 0.12f);
         }
-        for (int row = 0; row < (palette == Palette.Special ? 4 : 3); row++)
+        for (int row = 0; row < (palette == Palette.Special ? 5 : 3); row++)
             for (int col = 0; col < 2; col++)
             {
                 var slot = new Rectangle(3 + col * 32, 8 + row * 31, 27, 27);
@@ -1072,6 +1149,7 @@ public sealed class EditorMode : GameMode, IDisposable
             DrawPaletteItem(movingPlatformSprite, new Rectangle(0, 0, 24, 8), MovingPlatformButton.Rect);
             DrawPaletteItem(spikeSprite, new Rectangle(0, 0, 8, 8), SpikeButton.Rect);
             DrawPaletteItem(doorSprite, new Rectangle(0, 0, 16, 16), DoorButton.Rect);
+            DrawPaletteItem(elevatorSprite, new Rectangle(0, 0, 16, 24), ElevatorButton.Rect);
         }
     }
 

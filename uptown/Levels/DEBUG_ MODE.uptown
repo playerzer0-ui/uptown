@@ -7477,7 +7477,9 @@
       "WidthTiles": 6,
       "Waypoints": [],
       "MoveSpeed": 40,
-      "Direction": 0
+      "Direction": 0,
+      "PairId": null,
+      "IsDestination": false
     },
     {
       "Type": "bounceball",
@@ -7486,7 +7488,9 @@
       "WidthTiles": 6,
       "Waypoints": [],
       "MoveSpeed": 40,
-      "Direction": 0
+      "Direction": 0,
+      "PairId": null,
+      "IsDestination": false
     },
     {
       "Type": "exit",
@@ -7495,7 +7499,9 @@
       "WidthTiles": 6,
       "Waypoints": [],
       "MoveSpeed": 40,
-      "Direction": 0
+      "Direction": 0,
+      "PairId": null,
+      "IsDestination": false
     },
     {
       "Type": "movingplatform",
@@ -7537,7 +7543,9 @@
         }
       ],
       "MoveSpeed": 40,
-      "Direction": 0
+      "Direction": 0,
+      "PairId": null,
+      "IsDestination": false
     },
     {
       "Type": "spike",
@@ -7546,7 +7554,9 @@
       "WidthTiles": 6,
       "Waypoints": [],
       "MoveSpeed": 40,
-      "Direction": 0
+      "Direction": 0,
+      "PairId": null,
+      "IsDestination": false
     },
     {
       "Type": "spike",
@@ -7555,7 +7565,9 @@
       "WidthTiles": 6,
       "Waypoints": [],
       "MoveSpeed": 40,
-      "Direction": 0
+      "Direction": 0,
+      "PairId": null,
+      "IsDestination": false
     },
     {
       "Type": "spike",
@@ -7564,7 +7576,9 @@
       "WidthTiles": 6,
       "Waypoints": [],
       "MoveSpeed": 40,
-      "Direction": 3
+      "Direction": 3,
+      "PairId": null,
+      "IsDestination": false
     },
     {
       "Type": "spike",
@@ -7573,7 +7587,9 @@
       "WidthTiles": 6,
       "Waypoints": [],
       "MoveSpeed": 40,
-      "Direction": 2
+      "Direction": 2,
+      "PairId": null,
+      "IsDestination": false
     },
     {
       "Type": "spike",
@@ -7582,7 +7598,9 @@
       "WidthTiles": 6,
       "Waypoints": [],
       "MoveSpeed": 40,
-      "Direction": 1
+      "Direction": 1,
+      "PairId": null,
+      "IsDestination": false
     },
     {
       "Type": "spike",
@@ -7591,7 +7609,9 @@
       "WidthTiles": 6,
       "Waypoints": [],
       "MoveSpeed": 40,
-      "Direction": 0
+      "Direction": 0,
+      "PairId": null,
+      "IsDestination": false
     },
     {
       "Type": "spike",
@@ -7600,7 +7620,9 @@
       "WidthTiles": 6,
       "Waypoints": [],
       "MoveSpeed": 40,
-      "Direction": 0
+      "Direction": 0,
+      "PairId": null,
+      "IsDestination": false
     },
     {
       "Type": "door",
@@ -7609,7 +7631,9 @@
       "WidthTiles": 6,
       "Waypoints": [],
       "MoveSpeed": 40,
-      "Direction": 0
+      "Direction": 0,
+      "PairId": null,
+      "IsDestination": false
     },
     {
       "Type": "lightstick",
@@ -7618,7 +7642,9 @@
       "WidthTiles": 6,
       "Waypoints": [],
       "MoveSpeed": 40,
-      "Direction": 0
+      "Direction": 0,
+      "PairId": null,
+      "IsDestination": false
     },
     {
       "Type": "lightstick",
@@ -7627,7 +7653,53 @@
       "WidthTiles": 6,
       "Waypoints": [],
       "MoveSpeed": 40,
-      "Direction": 0
+      "Direction": 0,
+      "PairId": null,
+      "IsDestination": false
+    },
+    {
+      "Type": "elevator",
+      "X": 144,
+      "Y": 224,
+      "WidthTiles": 6,
+      "Waypoints": [],
+      "MoveSpeed": 40,
+      "Direction": 0,
+      "PairId": "f319e9747e064cc6a4b1f006bced6b16",
+      "IsDestination": false
+    },
+    {
+      "Type": "elevator",
+      "X": 360,
+      "Y": 248,
+      "WidthTiles": 6,
+      "Waypoints": [],
+      "MoveSpeed": 40,
+      "Direction": 0,
+      "PairId": "f319e9747e064cc6a4b1f006bced6b16",
+      "IsDestination": true
+    },
+    {
+      "Type": "elevator",
+      "X": 312,
+      "Y": 248,
+      "WidthTiles": 6,
+      "Waypoints": [],
+      "MoveSpeed": 40,
+      "Direction": 0,
+      "PairId": "ab21d8030770473fb2cbd9e788ab346c",
+      "IsDestination": false
+    },
+    {
+      "Type": "elevator",
+      "X": 408,
+      "Y": 248,
+      "WidthTiles": 6,
+      "Waypoints": [],
+      "MoveSpeed": 40,
+      "Direction": 0,
+      "PairId": "ab21d8030770473fb2cbd9e788ab346c",
+      "IsDestination": true
     },
     {
       "Type": "platform",
@@ -7636,7 +7708,9 @@
       "WidthTiles": 4,
       "Waypoints": [],
       "MoveSpeed": 40,
-      "Direction": 0
+      "Direction": 0,
+      "PairId": null,
+      "IsDestination": false
     }
   ]
 }

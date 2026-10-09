@@ -13,6 +13,24 @@
 
 #---------------------------------- Content ---------------------------------#
 
+#begin graphics/special_objects/elevatoropen.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyEnabled=False
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:TextureFormat=Color
+/build:graphics/special_objects/elevatoropen.png;graphics/special_objects/elevatoropen
+
+#begin graphics/special_objects/elevatorclosewithplayer.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyEnabled=False
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:TextureFormat=Color
+/build:graphics/special_objects/elevatorclosewithplayer.png;graphics/special_objects/elevatorclosewithplayer
+
 #begin File.spritefont
 /importer:FontDescriptionImporter
 /processor:FontDescriptionProcessor
@@ -223,6 +241,30 @@
 /processorParam:MakeSquare=False
 /processorParam:TextureFormat=Color
 /build:graphics/special_objects/door.png;graphics/special_objects/door
+
+#begin graphics/special_objects/elevatorclosewithplayer.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:graphics/special_objects/elevatorclosewithplayer.png;graphics/special_objects/elevatorclosewithplayer
+
+#begin graphics/special_objects/elevatoropen.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:graphics/special_objects/elevatoropen.png;graphics/special_objects/elevatoropen
 
 #begin graphics/special_objects/exit_flag.png
 /importer:TextureImporter

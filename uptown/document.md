@@ -30,6 +30,7 @@ The editor starts with an empty **400 × 80 grid of 8-pixel tiles**. Terrain cho
 - `MovingPlatform` follows a route back and forth, carries/pushes players, and can crush them.
 - `Spike` kills on contact and can attach to a moving platform.
 - `Door` opens on contact; its top becomes a one-way landing surface.
+- `Elevator` is a linked pair that works in both directions. Nearby doors open; K at either open door starts a 0.3-second closing/teleport sequence, followed by the arrival door's reverse animation before movement resumes. Platforms and world animations keep updating during travel; the hidden passenger cannot be pushed or hit by hazards. The editor draws a lavender connector with arrows in both directions between the indicators above the doors; play mode hides it.
 - `SpecialObject` provides shared touch/reset methods; `ObjectRotation` handles directions and rotated bounds.
 
 Deaths reset objects while keeping the active checkpoint.
@@ -46,7 +47,7 @@ Deaths reset objects while keeping the active checkpoint.
 ## Useful controls
 
 - **Anywhere:** F1 play, F2 editor, F3 home, Esc exit.
-- **Play:** WASD/arrows move; Space jumps; hold J to grab/climb walls; S/down crouches; R respawns. Controller input is also supported.
+- **Play:** WASD/arrows move; Space jumps; hold J to grab/climb walls; S/down crouches; R respawns; K enters either open elevator in a linked pair. Controller input is also supported for movement.
 - **Editor:** choose a palette tool; left-drag paints/places, right-click/drag deletes or erases. P + click sets spawn; R rotates supported objects. Wheel zooms, middle-drag pans, F fits the level. Ctrl+Right/Down expands it; Ctrl+S starts save validation.
 - **Moving routes:** click start and waypoints, double-click or Enter to finish, right-click/Backspace to undo draft points, drag platform ends to resize.
 

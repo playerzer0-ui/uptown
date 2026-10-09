@@ -39,6 +39,7 @@ public static class ObjectRotation
     public static Rectangle Bounds(Point feet, string type, BounceDirection direction, bool collision = false)
     {
         if (type == LevelObject.Lightstick) return uptown.Decorations.Lightstick.Bounds(feet);
+        if (type == LevelObject.Elevator) return Elevator.Bounds(feet);
         if (type == LevelObject.Spike) return new Rectangle(feet.X - 4, feet.Y - 8, 8, 8);
         bool launcher = type == LevelObject.BounceBall || type == LevelObject.Spring;
         int width = launcher ? 16 : collision ? 8 : 16;

@@ -17,6 +17,7 @@ public sealed class PlayMode : GameMode
     private readonly BackgroundMap background;
     private readonly Player player;
     private readonly DeathEffect deathEffect = new(Player.DeathDuration);
+    private readonly ElevatorTravel elevatorTravel = new();
     private readonly Camera camera;
     private readonly EntityList entities = new();
     private readonly SpriteFont font;
@@ -54,6 +55,7 @@ public sealed class PlayMode : GameMode
         {
             var feet = new Vector2(item.X, item.Y);
             if (item.Type == LevelObject.Lightstick && Lightstick.Supported(feet.ToPoint(), background.Occupied)) entities.Add(new Lightstick(feet));
+            else if (item.Type == LevelObject.Elevator) entities.Add(new Elevator(item));
             else if (item.Type == LevelObject.Checkpoint) entities.Add(new Checkpoint(feet, item.Direction));
             else if (item.Type == LevelObject.ExitFlag) entities.Add(new ExitFlag(feet, item.Direction));
             else if (item.Type == LevelObject.BounceBall) entities.Add(new BounceBall(feet, item.Direction));
@@ -97,27 +99,41 @@ public sealed class PlayMode : GameMode
     {
         RefreshLayout();
         if (HandleStop(Mouse.GetState())) return;
+        bool elevatorFrame = elevatorTravel.Active;
+        if (!levelComplete && !player.IsDead)
+            elevatorFrame = UpdateElevators(gameTime) || elevatorFrame;
         deathEffect.Update(gameTime);
         tileMap.Update(gameTime);
         // Once the level is complete the player freezes; objects keep animating.
-        if (!levelComplete) player.Update(gameTime);
+        if (!levelComplete && !elevatorFrame) player.Update(gameTime);
         if (ResetAfterDeath()) { UpdateCamera(); return; }
         if (player.IsDead) return;
-        if (!levelComplete)
-            foreach (var platform in entities.OfType<MovingPlatform>())
-            {
-                platform.Advance(gameTime, player, collisionMap);
-                if (resetPending || player.IsDead) break;
-            }
+        UpdateObjects(gameTime);
         if (ResetAfterDeath()) { UpdateCamera(); return; }
         if (player.IsDead) return;
-        entities.Update(gameTime);
+        if (elevatorFrame)
+        {
+            elevatorTravel.Update(gameTime, player);
+            UpdateCamera();
+            return;
+        }
         if (levelComplete) return;
         TouchSpecialObjects();
         if (ResetAfterDeath()) { UpdateCamera(); return; }
         if (player.IsDead) return;
         UpdateCamera();
         CheckCompletion();
+    }
+
+    private void UpdateObjects(GameTime gameTime)
+    {
+        if (!levelComplete)
+            foreach (var platform in entities.OfType<MovingPlatform>())
+            {
+                platform.Advance(gameTime, player, collisionMap);
+                if (resetPending || player.IsDead) break;
+            }
+        if (!resetPending && !player.IsDead) entities.Update(gameTime);
     }
 
     private void CheckCompletion()
@@ -128,6 +144,21 @@ public sealed class PlayMode : GameMode
         levelCleared = null;
         saveAttempted = onCleared != null;
         levelSaved = onCleared?.Invoke() ?? false;
+    }
+
+    private bool UpdateElevators(GameTime gameTime)
+    {
+        var elevators = entities.OfType<Elevator>().ToList();
+        foreach (var elevator in elevators)
+            elevator.UpdateNearby(player, (float)gameTime.ElapsedGameTime.TotalSeconds);
+        if (!Globals.Input.KeyJustDown(Keys.K)) return false;
+        foreach (var source in elevators)
+        {
+            if (!source.CanEnter(player)) continue;
+            var destination = elevators.FirstOrDefault(item => item != source && item.PairId == source.PairId);
+            if (destination != null && elevatorTravel.Begin(source, destination, player)) return true;
+        }
+        return false;
     }
 
     private bool ResetAfterDeath()
@@ -148,6 +179,9 @@ public sealed class PlayMode : GameMode
         background.Draw();
         tileMap.Draw();
         entities.Draw();
+        foreach (var elevator in entities.OfType<Elevator>())
+            if (!elevatorTravel.Active && elevator.CanEnter(player))
+                Globals.spriteBatch.DrawString(font, "K", elevator.Position - new Vector2(3, 34), PicoPallete.white);
         player.Draw();
         foreach (var lightstick in entities.OfType<Lightstick>()) lightstick.DrawGlow();
         deathEffect.Draw();

@@ -22,6 +22,7 @@ public sealed class LevelObject
     public const string Spike = "spike";
     public const string Door = "door";
     public const string Lightstick = "lightstick";
+    public const string Elevator = "elevator";
 
     public string Type { get; set; }
     public int X { get; set; }
@@ -30,6 +31,8 @@ public sealed class LevelObject
     public List<LevelWaypoint> Waypoints { get; set; } = new();
     public float MoveSpeed { get; set; } = 40f;
     public BounceDirection Direction { get; set; } = BounceDirection.Up;
+    public string PairId { get; set; }
+    public bool IsDestination { get; set; }
 }
 
 public sealed class LevelWaypoint
@@ -64,6 +67,7 @@ public sealed class LevelData
         if (objects != null)
             foreach (var item in objects) data.Objects.Add(new LevelObject
                 { Type = item.Type, X = item.X, Y = item.Y, Direction = item.Direction, WidthTiles = item.WidthTiles,
+                    PairId = item.PairId, IsDestination = item.IsDestination,
                     MoveSpeed = item.MoveSpeed, Waypoints = item.Waypoints?.ConvertAll(p => new LevelWaypoint { X = p.X, Y = p.Y }) ?? new() });
         data.Terrain = new int[data.Height][];
         data.TerrainMaterials = new int[data.Height][];
@@ -160,6 +164,8 @@ public sealed class LevelData
                     || Array.Exists(row, id => id < 0 || id >= names.Length)))))
             throw new InvalidDataException("Level file has invalid terrain materials.");
         data.Objects.RemoveAll(item => item == null);
+        if (!uptown.SpecialObjects.Elevator.ValidPairs(data.Objects))
+            throw new InvalidDataException("Each elevator pair needs exactly one source and one destination.");
         foreach (var item in data.Objects)
         {
             item.Waypoints ??= new();
