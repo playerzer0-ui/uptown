@@ -160,7 +160,9 @@ public sealed class AutoTileMap : Map
         }
     }
 
-    public override void Draw()
+    public override void Draw() => Draw(1f);
+
+    public void Draw(float opacity)
     {
         for (int y = 0; y < Height; y++)
             for (int x = 0; x < Width; x++)
@@ -168,7 +170,7 @@ public sealed class AutoTileMap : Map
                 if (!Occupied(x, y)) continue;
                 for (int q = 0; q < 4; q++)
                     Globals.spriteBatch.Draw(textures[MaterialAt(x, y)], new Vector2(x * 8 + q % 2 * 4, y * 8 + q / 2 * 4),
-                        quarters[y, x, q], Color.White);
+                        quarters[y, x, q], Color.White * opacity);
             }
     }
 }

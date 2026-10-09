@@ -13,6 +13,7 @@ namespace uptown.Modes;
 public sealed class PlayMode : GameMode
 {
     private readonly AutoTileMap tileMap;
+    private readonly BackgroundMap background;
     private readonly Player player;
     private readonly Camera camera;
     private readonly EntityList entities = new();
@@ -38,6 +39,7 @@ public sealed class PlayMode : GameMode
         this.levelCleared = levelCleared;
         tileMap = new AutoTileMap(TerrainCatalog.Paths(), level.CreateGrid(false),
             level.CreateMaterials(TerrainCatalog.Names));
+        background = new BackgroundMap(level.Width, level.Height, level.CreateBackgroundGrid());
         var collisions = new CollisionMap("graphics/tileset/collision", 8, 8,
             level.CreateGrid(true));
         camera = new Camera();
@@ -135,6 +137,7 @@ public sealed class PlayMode : GameMode
         Globals.graphics.GraphicsDevice.Clear(PicoPallete.blue);
         Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp,
             transformMatrix: WindowRendering.PixelAligned(camera.Transform()));
+        background.Draw();
         tileMap.Draw();
         entities.Draw();
         player.Draw();

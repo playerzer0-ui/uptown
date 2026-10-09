@@ -13,6 +13,11 @@ namespace uptown.Modes;
 public sealed class EditorMode : GameMode
 {
     private AutoTileMap preview;
+    private BackgroundMap background;
+    private readonly CollisionRect[] backgroundButtons;
+    private readonly Texture2D[] backgroundTextures;
+    private int selectedBackground;
+    private float ForegroundOpacity => palette == Palette.Background ? 0.5f : 1f;
     private readonly Action<string> showStatus;
     private readonly Action<LevelData, Func<bool>> startSaveValidation;
     private Point? spawn;
@@ -23,9 +28,9 @@ public sealed class EditorMode : GameMode
         PlatformLayout.Rebuild(objects, PlatformLayout.Cells(objects), preview.Width, preview.Height, preview.Occupied);
         objects.RemoveAll(item => item.Type == LevelObject.Spike
             && !Spike.Supported(new Point(item.X, item.Y), item.Direction, preview.Occupied, objects));
-        return LevelData.Capture(preview, spawn, objects);
+        return LevelData.Capture(preview, spawn, objects, background);
     }
-    private enum Tool { None, Terrain, Spawn, Checkpoint, Exit, BounceBall, Spring, Platform, MovingPlatform, Spike, Door }
+    private enum Tool { None, Terrain, Background, Spawn, Checkpoint, Exit, BounceBall, Spring, Platform, MovingPlatform, Spike, Door }
     private enum Palette { Terrain, Special, Sprites, Background }
     private Palette palette;
     private readonly Texture2D[] bars;
@@ -129,6 +134,13 @@ public sealed class EditorMode : GameMode
             terrainButtons[i] = new CollisionRect(16 + i % 2 * 32, 21 + i / 2 * 31, 27, 27);
             tilesets[i] = Globals.Content.Load<Texture2D>("graphics/tileset/" + TerrainCatalog.Names[i]);
         }
+        backgroundButtons = new CollisionRect[BackgroundMap.Names.Length];
+        backgroundTextures = new Texture2D[BackgroundMap.Names.Length];
+        for (int i = 0; i < backgroundButtons.Length; i++)
+        {
+            backgroundButtons[i] = new CollisionRect(16 + i % 2 * 32, 21 + i / 2 * 31, 27, 27);
+            backgroundTextures[i] = Globals.Content.Load<Texture2D>("graphics/backgroundtiles/" + BackgroundMap.Names[i]);
+        }
         SpawnButton = new CollisionRect(16, 21, 27, 27);
         CheckpointButton = new CollisionRect(16, 21, 27, 27);
         ExitButton = new CollisionRect(48, 21, 27, 27);
@@ -147,6 +159,7 @@ public sealed class EditorMode : GameMode
         for (int y = 0; y < 80; y++)
             for (int x = 0; x < 400; x++) blank[y, x] = -1;
         preview = new AutoTileMap(TerrainCatalog.Paths(), blank, new int[80, 400]);
+        background = new BackgroundMap(preview.Width, preview.Height);
         snapshot = Capture();
         camera = new Camera { Origin = Vector2.Zero };
         RefreshLayout();
@@ -240,7 +253,12 @@ public sealed class EditorMode : GameMode
                         selectedTerrain = TerrainAt(pointer);
                         showStatus("Terrain: " + TerrainCatalog.Names[selectedTerrain]);
                     }
-                    draggingFromPalette = tool != Tool.Terrain && tool != Tool.Platform && tool != Tool.MovingPlatform;
+                    if (tool == Tool.Background)
+                    {
+                        selectedBackground = BackgroundAt(pointer);
+                        showStatus("Background: " + BackgroundMap.Names[selectedBackground] + " | Left-drag: paint | Right-drag: erase");
+                    }
+                    draggingFromPalette = tool != Tool.Background && tool != Tool.Terrain && tool != Tool.Platform && tool != Tool.MovingPlatform;
                     if (IsSpecialTool()) showStatus(tool == Tool.Platform
                         ? "Platform | Drag to paint horizontally from terrain | Right-drag: erase"
                         : tool == Tool.MovingPlatform ? "Moving platform | Click start and waypoints | Double-click: finish | Drag ends: resize | Right-click: undo"
@@ -325,7 +343,7 @@ public sealed class EditorMode : GameMode
             lastErase = erase;
             return;
         }
-        if (tool == Tool.Terrain && overLevel && scroll == 0
+        if ((tool == Tool.Terrain || tool == Tool.Background) && overLevel && scroll == 0
             && (mouse.LeftButton == ButtonState.Pressed || mouse.RightButton == ButtonState.Pressed))
         {
             Vector2 world = Vector2.Transform(position, Matrix.Invert(WorldTransform()));
@@ -363,7 +381,8 @@ public sealed class EditorMode : GameMode
         RefreshLayout();
         Globals.graphics.GraphicsDevice.Clear(new Color(0, 174, 220));
         Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp, transformMatrix: WorldTransform());
-        preview.Draw();
+        background.Draw();
+        preview.Draw(ForegroundOpacity);
         Globals.spriteBatch.End();
 
         // Screen-space lines stay one pixel wide regardless of editor zoom.
@@ -379,13 +398,13 @@ public sealed class EditorMode : GameMode
             DrawObject(item.Type, new Point(item.X, item.Y), ObjectFits(new Point(item.X, item.Y), item.Type, item, item.Direction),
                 dragged ? 0.35f : 1f, item.Direction, item.WidthTiles);
             if (item.Type == LevelObject.MovingPlatform)
-                MovingPlatform.DrawRoute(MovingPlatform.Route(item), Color.White * (dragged ? 0.35f : 1f));
+                MovingPlatform.DrawRoute(MovingPlatform.Route(item), Color.White * (dragged ? 0.35f : 1f) * ForegroundOpacity);
         }
         if (pathDraft != null)
         {
             DrawObject(LevelObject.MovingPlatform, new Point(pathDraft.X, pathDraft.Y), true, 0.8f, widthTiles: pathDraft.WidthTiles);
             var route = MovingPlatform.Route(pathDraft);
-            MovingPlatform.DrawRoute(route, Color.White);
+            MovingPlatform.DrawRoute(route, Color.White * ForegroundOpacity);
             if (pathCursor.HasValue)
                 MovingPlatform.DrawRoute(new List<Vector2> { route[^1], pathCursor.Value.ToVector2() },
                     pathCursorValid ? Color.White * 0.6f : Color.Red);
@@ -433,7 +452,9 @@ public sealed class EditorMode : GameMode
         var data = LevelData.Load(path);
         preview = new AutoTileMap(TerrainCatalog.Paths(), data.CreateGrid(false),
             data.CreateMaterials(TerrainCatalog.Names));
+        background = new BackgroundMap(data.Width, data.Height, data.CreateBackgroundGrid());
         selectedTerrain = 0;
+        selectedBackground = 0;
         spawn = data.HasSpawn ? new Point(data.SpawnX, data.SpawnY) : null;
         objects.Clear();
         objects.AddRange(data.Objects);
@@ -860,6 +881,7 @@ public sealed class EditorMode : GameMode
     // First frame of the object's sprite at its feet; blocked spots are tinted red.
     private void DrawObject(string type, Point feet, bool valid, float alpha, BounceDirection direction = BounceDirection.Up, int widthTiles = 6)
     {
+        alpha *= ForegroundOpacity;
         if (type == LevelObject.Door)
         {
             Globals.spriteBatch.Draw(doorSprite, feet.ToVector2(), new Rectangle(0, 0, 16, 16),
@@ -908,6 +930,7 @@ public sealed class EditorMode : GameMode
     // Idle frame drawn at the feet position; invalid spots are tinted red.
     private void DrawPlayer(Point feet, bool valid, float alpha)
     {
+        alpha *= ForegroundOpacity;
         if (!valid) Fill(new Rectangle(feet.X - 4, feet.Y - 12, 8, 12), Color.Red * 0.5f * alpha);
         Globals.spriteBatch.Draw(playerSprite, new Vector2(feet.X - 8, feet.Y - 16), new Rectangle(0, 0, 16, 16),
             (valid ? Color.White : new Color(255, 120, 120)) * alpha);
@@ -921,8 +944,17 @@ public sealed class EditorMode : GameMode
         return -1;
     }
 
+    private int BackgroundAt(Point point)
+    {
+        if (palette != Palette.Background) return -1;
+        for (int i = 0; i < backgroundButtons.Length; i++)
+            if (backgroundButtons[i].Contains(point)) return i;
+        return -1;
+    }
+
     private Tool PaletteToolAt(Point point)
     {
+        if (BackgroundAt(point) >= 0) return Tool.Background;
         if (TerrainAt(point) >= 0) return Tool.Terrain;
         if (palette == Palette.Sprites && SpawnButton.Contains(point)) return Tool.Spawn;
         if (palette == Palette.Special && CheckpointButton.Contains(point)) return Tool.Checkpoint;
@@ -956,7 +988,8 @@ public sealed class EditorMode : GameMode
                 var slot = new Rectangle(3 + col * 32, 8 + row * 31, 27, 27);
                 Tool item = PaletteToolAt(slot.Center);
                 bool selected = item != Tool.None && tool == item
-                    && (item != Tool.Terrain || row * 2 + col == selectedTerrain);
+                    && (item != Tool.Terrain || row * 2 + col == selectedTerrain)
+                    && (item != Tool.Background || row * 2 + col == selectedBackground);
                 Color border = selected ? Color.Yellow
                     : item != Tool.None && slot.Contains(pointer) ? Color.White : new Color(194, 195, 199);
                 Fill(slot, border);
@@ -967,6 +1000,11 @@ public sealed class EditorMode : GameMode
         {
             for (int i = 0; i < tilesets.Length; i++)
                 DrawPaletteItem(tilesets[i], new Rectangle(0, 0, 8, 8), terrainButtons[i].Rect);
+        }
+        else if (palette == Palette.Background)
+        {
+            for (int i = 0; i < backgroundTextures.Length; i++)
+                DrawPaletteItem(backgroundTextures[i], new Rectangle(0, 0, 8, 8), backgroundButtons[i].Rect);
         }
         else if (palette == Palette.Sprites)
             DrawPaletteItem(playerSprite, new Rectangle(0, 0, 16, 16), SpawnButton.Rect);
@@ -1079,6 +1117,7 @@ public sealed class EditorMode : GameMode
         try
         {
             preview.Expand(preview.Width + columns, preview.Height + rows);
+            background.Expand(preview.Width, preview.Height);
             snapshot = Capture();
             lastPaintCell = null;
             FitLevel();
@@ -1095,7 +1134,8 @@ public sealed class EditorMode : GameMode
         int error = dx + dy;
         while (true)
         {
-            preview.Paint(from.X, from.Y, solid, selectedTerrain);
+            if (tool == Tool.Background) background.Paint(from.X, from.Y, solid ? selectedBackground : -1);
+            else preview.Paint(from.X, from.Y, solid, selectedTerrain);
             if (from == to) { snapshot = Capture(); break; }
             int twice = 2 * error;
             if (twice >= dy) { error += dy; from.X += sx; }

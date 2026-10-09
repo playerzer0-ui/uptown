@@ -51,10 +51,12 @@ public sealed class LevelData
     public int[][] Terrain { get; set; }
     public string[] TerrainTilesets { get; set; }
     public int[][] TerrainMaterials { get; set; }
+    public int[][] Background { get; set; }
+    public string[] BackgroundTilesets { get; set; }
     // Older level files have no objects; the empty default keeps them loading.
     public List<LevelObject> Objects { get; set; } = new();
 
-    public static LevelData Capture(AutoTileMap map, Point? spawn, IEnumerable<LevelObject> objects = null)
+    public static LevelData Capture(AutoTileMap map, Point? spawn, IEnumerable<LevelObject> objects = null, BackgroundMap background = null)
     {
         var data = new LevelData { Version = 2, Width = map.Width, Height = map.Height,
             TerrainTilesets = map.Tilesets == null ? new[] { "basic" } : (string[])map.Tilesets.Clone() };
@@ -82,6 +84,8 @@ public sealed class LevelData
                     { spawn = new Point(x * 8 + 4, y * 8); break; }
         }
         data.HasSpawn = spawn.HasValue;
+        data.Background = background?.Capture();
+        data.BackgroundTilesets = background == null ? null : (string[])BackgroundMap.Names.Clone();
         data.SpawnX = spawn?.X ?? 12;
         data.SpawnY = spawn?.Y ?? 16;
         return data;
@@ -92,6 +96,17 @@ public sealed class LevelData
         var grid = new int[Height, Width];
         for (int y = 0; y < Height; y++)
             for (int x = 0; x < Width; x++) grid[y, x] = Terrain[y][x] == 1 ? (collision ? 0 : 6) : -1;
+        return grid;
+    }
+
+    public int[,] CreateBackgroundGrid()
+    {
+        var grid = BackgroundMap.EmptyGrid(Width, Height);
+        if (Background == null) return grid;
+        var names = BackgroundTilesets ?? BackgroundMap.Names;
+        for (int y = 0; y < Height; y++)
+            for (int x = 0; x < Width; x++)
+                if (Background[y][x] >= 0) grid[y, x] = Array.IndexOf(BackgroundMap.Names, names[Background[y][x]]);
         return grid;
     }
 
@@ -132,6 +147,11 @@ public sealed class LevelData
             || data.Terrain.Length != data.Height || Array.Exists(data.Terrain, row => row == null || row.Length != data.Width))
             throw new InvalidDataException("Level file is missing or has mismatched terrain.");
         data.Objects ??= new();
+        var backgroundNames = data.BackgroundTilesets ?? BackgroundMap.Names;
+        if (data.Background != null && (backgroundNames.Length == 0 || Array.Exists(backgroundNames, string.IsNullOrWhiteSpace)
+            || data.Background.Length != data.Height || Array.Exists(data.Background, row => row == null || row.Length != data.Width
+                || Array.Exists(row, id => id < -1 || id >= backgroundNames.Length))))
+            throw new InvalidDataException("Level file has invalid background tiles.");
         var names = data.TerrainTilesets ?? new[] { data.Tileset ?? "basic" };
         if (names.Length == 0 || Array.Exists(names, string.IsNullOrWhiteSpace)
             || (data.TerrainMaterials != null && (data.TerrainMaterials.Length != data.Height
