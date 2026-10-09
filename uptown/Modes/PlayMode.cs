@@ -13,6 +13,7 @@ namespace uptown.Modes;
 
 public sealed class PlayMode : GameMode
 {
+    private readonly LobbyLevelPicker lobbyPicker;
     private readonly Map tileMap;
     private readonly BackgroundMap background;
     private readonly Player player;
@@ -37,7 +38,7 @@ public sealed class PlayMode : GameMode
     private int renderScale = 1;
 
     // The normal Play entry is the fixed CSV lobby; editor tests use the LevelData overload.
-    public PlayMode(Action returnToHome)
+    public PlayMode(Action returnToHome, Action<LevelData> playLevel = null)
     {
         returnToEditor = returnToHome;
         string mapFolder = Path.Combine(AppContext.BaseDirectory, "Content", "maps");
@@ -52,6 +53,12 @@ public sealed class PlayMode : GameMode
         player = new Player(collisionMap, FindLobbySpawn(collisionMap));
         player.Respawned += () => resetPending = true;
         player.Died += deathEffect.Start;
+        if (playLevel != null)
+        {
+            lobbyPicker = new LobbyLevelPicker(Path.Combine(mapFolder, "lobby_special.csv"),
+                tileMap.Width, tileMap.Height, playLevel, font);
+            entities.Add(lobbyPicker.Elevator);
+        }
         RefreshLayout();
     }
 
@@ -127,14 +134,24 @@ public sealed class PlayMode : GameMode
 
     public override void Enter() => previousMouse = Mouse.GetState();
     private readonly CollisionMap collisionMap;
-    public override void Leave() => levelCleared = null;
+    public override void Leave()
+    {
+        levelCleared = null;
+        lobbyPicker?.Cancel(player);
+    }
 
     public override void Update(GameTime gameTime)
     {
         RefreshLayout();
         if (HandleStop(Mouse.GetState())) return;
+        if (lobbyPicker != null && lobbyPicker.Update(gameTime, player, windowWidth, windowHeight, renderScale))
+        {
+            tileMap.Update(gameTime);
+            UpdateCamera();
+            return;
+        }
         bool elevatorFrame = elevatorTravel.Active;
-        if (!levelComplete && !player.IsDead)
+        if (lobbyPicker == null && !levelComplete && !player.IsDead)
             elevatorFrame = UpdateElevators(gameTime) || elevatorFrame;
         deathEffect.Update(gameTime);
         tileMap.Update(gameTime);
@@ -238,6 +255,7 @@ public sealed class PlayMode : GameMode
         }
         Globals.spriteBatch.Begin(samplerState: SamplerState.PointClamp);
         DrawStopButton();
+        lobbyPicker?.Draw(windowWidth, windowHeight, renderScale);
         Globals.spriteBatch.End();
     }
 

@@ -129,7 +129,7 @@ namespace uptown
         public void SwitchMode(ModeId mode)
         {
             if (mode == ModeId.Play && CurrentMode != ModeId.Play)
-                _modes[ModeId.Play] = new PlayMode(() => SwitchMode(ModeId.Home));
+                _modes[ModeId.Play] = new PlayMode(() => SwitchMode(ModeId.Home), StartSavedLevel);
             if (mode == ModeId.PlayTest && CurrentMode != ModeId.PlayTest)
             {
                 var data = ((EditorMode)_modes[ModeId.Editor]).Capture();
@@ -141,6 +141,12 @@ namespace uptown
                 _modes[ModeId.PlayTest] = new PlayMode(data, () => SwitchMode(ModeId.Editor));
             }
             ActivateMode(mode);
+        }
+
+        private void StartSavedLevel(LevelData level)
+        {
+            _modes[ModeId.SavedPlay] = new PlayMode(level, () => SwitchMode(ModeId.Play));
+            ActivateMode(ModeId.SavedPlay);
         }
 
         private void StartSaveValidation(LevelData data, Func<bool> saveClearedLevel)

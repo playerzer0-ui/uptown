@@ -2,7 +2,7 @@ using Microsoft.Xna.Framework;
 
 namespace uptown.Modes;
 
-public enum ModeId { Play, Editor, Home, PlayTest }
+public enum ModeId { Play, Editor, Home, PlayTest, SavedPlay }
 
 // Game1 owns input polling and canvas presentation. Only the active mode runs.
 public abstract class GameMode
