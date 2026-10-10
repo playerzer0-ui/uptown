@@ -63,10 +63,10 @@ namespace uptown
             Globals.spriteBatch = _spriteBatch;
             Globals.graphics = _graphics;
 
-            _modes.Add(ModeId.Editor, new EditorMode(this, SwitchMode, message => Window.Title = message, StartSaveValidation));
+            _modes.Add(ModeId.Editor, new EditorMode(this, SwitchMode, StartSaveValidation));
             _modes.Add(ModeId.Home, new HomeMode(
                 play: () => SwitchMode(ModeId.Play),
-                create: () => SwitchMode(ModeId.Editor),
+                create: CreateLevel,
                 listLevels: LevelData.ListSaves,
                 load: LoadLevel,
                 exit: Exit));
@@ -109,6 +109,12 @@ namespace uptown
             DeathEffect.DisposeTexture();
             if (_modes.TryGetValue(ModeId.Editor, out var editor)) ((EditorMode)editor).Dispose();
             base.UnloadContent();
+        }
+
+        private void CreateLevel()
+        {
+            ((EditorMode)_modes[ModeId.Editor]).NewLevel();
+            SwitchMode(ModeId.Editor);
         }
 
         private void LoadLevel(string path)

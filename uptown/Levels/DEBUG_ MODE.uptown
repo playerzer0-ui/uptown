@@ -7703,6 +7703,17 @@
     },
     {
       "Type": "platform",
+      "X": 92,
+      "Y": 168,
+      "WidthTiles": 1,
+      "Waypoints": [],
+      "MoveSpeed": 40,
+      "Direction": 0,
+      "PairId": null,
+      "IsDestination": false
+    },
+    {
+      "Type": "platform",
       "X": 40,
       "Y": 176,
       "WidthTiles": 4,

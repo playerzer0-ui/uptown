@@ -20,6 +20,10 @@ public sealed class EditorMode : GameMode, IDisposable
     private int selectedBackground;
     private float ForegroundOpacity => palette == Palette.Background ? 0.5f : 1f;
     private readonly Action<string> showStatus;
+    private readonly SpriteFont statusFont;
+    private string statusText = "";
+    private bool showControlHints;
+    private readonly Texture2D leftClickIcon, rightClickIcon, rotateIcon;
     private readonly Action<LevelData, Func<bool>> startSaveValidation;
     private Point? spawn;
     private string savePath;
@@ -123,14 +127,18 @@ public sealed class EditorMode : GameMode, IDisposable
     private readonly CollisionRect HomeButton;
     private readonly CollisionRect ToggleButton;
 
-    public EditorMode(Game game, Action<ModeId> switchMode, Action<string> showStatus, Action<LevelData, Func<bool>> startSaveValidation)
+    public EditorMode(Game game, Action<ModeId> switchMode, Action<LevelData, Func<bool>> startSaveValidation)
     {
         viewWidth = 320;
         viewHeight = 180;
         this.switchMode = switchMode;
-        this.showStatus = showStatus;
+        showStatus = message => { statusText = message ?? ""; showControlHints = false; };
+        leftClickIcon = Globals.Content.Load<Texture2D>("graphics/ui/leftclick");
+        rightClickIcon = Globals.Content.Load<Texture2D>("graphics/ui/rightclick");
+        rotateIcon = Globals.Content.Load<Texture2D>("graphics/ui/rotate");
+        statusFont = Globals.Content.Load<SpriteFont>("File");
         this.startSaveValidation = startSaveValidation;
-        levelNameInput = new TextInput(game, Globals.Content.Load<SpriteFont>("File"),
+        levelNameInput = new TextInput(game, statusFont,
             new CollisionRect(160, 16, 144, 24), "Level name")
         {
             MaxLength = 48,
@@ -184,14 +192,35 @@ public sealed class EditorMode : GameMode, IDisposable
         elevatorSprite = Globals.Content.Load<Texture2D>("graphics/special_objects/elevatoropen");
         pixel = new Texture2D(Globals.graphics.GraphicsDevice, 1, 1);
         pixel.SetData(new[] { Color.White });
+        camera = new Camera { Origin = Vector2.Zero };
+        RefreshLayout();
+        NewLevel();
+    }
+
+    // Create starts a new document; ordinary editor navigation retains the current one.
+    public void NewLevel()
+    {
+        CancelDrag();
+        objects.Clear();
+        spawn = null;
+        savePath = null;
+        levelNameInput.Blur();
+        levelNameInput.Text = "";
+        statusText = "";
+        showControlHints = false;
+        tool = Tool.None;
+        selectedTerrain = selectedBackground = 0;
+        bounceDirection = BounceDirection.Up;
+        manualSpringDirection = false;
+        isPanning = false;
+        lastPaintCell = null;
+        wheelRemainder = 0;
         var blank = new int[DefaultLevelHeight, DefaultLevelWidth];
         for (int y = 0; y < DefaultLevelHeight; y++)
             for (int x = 0; x < DefaultLevelWidth; x++) blank[y, x] = -1;
         preview = new AutoTileMap(TerrainCatalog.Paths(), blank, new int[DefaultLevelHeight, DefaultLevelWidth]);
-        background = new BackgroundMap(preview.Width, preview.Height);
+        background = new BackgroundMap(DefaultLevelWidth, DefaultLevelHeight);
         snapshot = Capture();
-        camera = new Camera { Origin = Vector2.Zero };
-        RefreshLayout();
         FitLevel();
     }
 
@@ -296,23 +325,10 @@ public sealed class EditorMode : GameMode, IDisposable
                         manualSpringDirection = false;
                     }
                     tool = selected;
-                    if (tool == Tool.Terrain)
-                    {
-                        selectedTerrain = TerrainAt(pointer);
-                        showStatus("Terrain: " + TerrainCatalog.Names[selectedTerrain]);
-                    }
-                    if (tool == Tool.Background)
-                    {
-                        selectedBackground = BackgroundAt(pointer);
-                        showStatus("Background: " + BackgroundMap.Names[selectedBackground] + " | Left-drag: paint | Right-drag: erase");
-                    }
-                    if (tool == Tool.Lightstick) showStatus("Lightstick | Place on a background tile | Drag to move | Right-click: delete");
-                    if (tool == Tool.Elevator) showStatus("Elevator | Place a linked pair | Drag either door | Right-click: delete pair | Play: K at either door");
+                    if (tool == Tool.Terrain) selectedTerrain = TerrainAt(pointer);
+                    if (tool == Tool.Background) selectedBackground = BackgroundAt(pointer);
+                    ShowControls();
                     draggingFromPalette = tool != Tool.Background && tool != Tool.Terrain && tool != Tool.Platform && tool != Tool.MovingPlatform;
-                    if (IsSpecialTool()) showStatus(tool == Tool.Platform
-                        ? "Platform | Drag to paint horizontally from terrain | Right-drag: erase"
-                        : tool == Tool.MovingPlatform ? "Moving platform | Click start and waypoints | Double-click: finish | Drag ends: resize | Right-click: undo"
-                        : $"{SelectedObjectType()}: {bounceDirection} | R: rotate");
                 }
             }
             return;
@@ -421,7 +437,7 @@ public sealed class EditorMode : GameMode, IDisposable
         else if (SaveButton.Contains(pointer)) SaveLevel();
         else if (PlayButton.Contains(pointer))
         {
-            if (pathDraft != null) showStatus("Double-click the final waypoint to finish the route first.");
+            if (pathDraft != null) showStatus("Finish the route first.");
             else switchMode(ModeId.PlayTest);
         }
         else if (HomeButton.Contains(pointer)) switchMode(ModeId.Home);
@@ -497,7 +513,63 @@ public sealed class EditorMode : GameMode, IDisposable
         DrawResizeControls();
         DrawButton(ToggleButton, arrowIcon, new Color(24, 100, 127),
             effects: sidebarOpen ? SpriteEffects.None : SpriteEffects.FlipHorizontally);
+        DrawStatus();
         Globals.spriteBatch.End();
+    }
+
+    private void ShowControls()
+    {
+        statusText = "";
+        showControlHints = true;
+    }
+
+    private void DrawControlHints()
+    {
+        bool rotates = tool is Tool.Checkpoint or Tool.Exit or Tool.BounceBall or Tool.Spring or Tool.Spike;
+        var hints = new List<(Texture2D Icon, string Label)> { (leftClickIcon, "Place"), (rightClickIcon, "Delete") };
+        if (rotates) hints.Add((rotateIcon, "R Rotate"));
+        float width = 0;
+        foreach (var hint in hints) width += 20 + statusFont.MeasureString(hint.Label).X + 12;
+        float x = MathF.Round((viewWidth - (width - 12)) / 2);
+        float y = viewHeight - 20;
+        foreach (var hint in hints)
+        {
+            Globals.spriteBatch.Draw(hint.Icon, new Rectangle((int)x, (int)y, 16, 16), Color.White);
+            var position = new Vector2(x + 20, y + MathF.Round((16 - statusFont.LineSpacing) / 2f));
+            Globals.spriteBatch.DrawString(statusFont, hint.Label, position + Vector2.One, PicoPallete.black);
+            Globals.spriteBatch.DrawString(statusFont, hint.Label, position, PicoPallete.white);
+            x += 20 + statusFont.MeasureString(hint.Label).X + 12;
+        }
+    }
+
+    private void DrawStatus()
+    {
+        if (showControlHints) { DrawControlHints(); return; }
+        if (string.IsNullOrWhiteSpace(statusText)) return;
+        float maxWidth = viewWidth - 16;
+        var lines = new List<string>();
+        string remaining = statusText;
+        while (remaining.Length > 0)
+        {
+            int length = remaining.Length;
+            while (length > 1 && statusFont.MeasureString(remaining[..length]).X > maxWidth) length--;
+            if (length < remaining.Length)
+            {
+                int space = remaining.LastIndexOf(' ', length - 1, length);
+                if (space > 0) length = space;
+            }
+            lines.Add(remaining[..length]);
+            remaining = remaining[length..].TrimStart();
+        }
+        float y = viewHeight - 4 - lines.Count * statusFont.LineSpacing;
+        foreach (string line in lines)
+        {
+            float x = MathF.Round((viewWidth - statusFont.MeasureString(line).X) / 2);
+            var position = new Vector2(x, y);
+            Globals.spriteBatch.DrawString(statusFont, line, position + Vector2.One, PicoPallete.black);
+            Globals.spriteBatch.DrawString(statusFont, line, position, PicoPallete.white);
+            y += statusFont.LineSpacing;
+        }
     }
 
     // Replaces the canvas with a saved level; later saves overwrite that file.
@@ -522,23 +594,23 @@ public sealed class EditorMode : GameMode, IDisposable
 
     public void SaveLevel()
     {
-        if (pathDraft != null) { showStatus("Double-click the final waypoint to finish the route first."); return; }
+        if (pathDraft != null) { showStatus("Finish the route first."); return; }
         var data = Capture();
-        if (!Elevator.ValidPairs(data.Objects)) { showStatus("Cannot save: each elevator needs a linked source and destination."); return; }
+        if (!Elevator.ValidPairs(data.Objects)) { showStatus("Link both elevator doors before saving."); return; }
         if (!data.Objects.Exists(item => item.Type == LevelObject.ExitFlag))
         {
-            showStatus("Cannot save: place an exit flag first.");
+            showStatus("Place an exit flag to save.");
             return;
         }
         if (!data.ValidSpawn())
         {
-            showStatus("Cannot save: set a clear player spawn or paint a platform first.");
+            showStatus("Set a valid spawn to save.");
             return;
         }
         foreach (var item in objects)
             if (!ObjectFits(new Point(item.X, item.Y), item.Type, item, item.Direction))
             {
-                showStatus("Cannot save: an object is blocked or missing its required terrain/background support.");
+                showStatus("Fix blocked or unsupported objects to save.");
                 return;
             }
         string name = levelNameInput.Text.Trim();
@@ -548,7 +620,7 @@ public sealed class EditorMode : GameMode, IDisposable
         try { path = LevelData.NamedSavePath(name); }
         catch (ArgumentException error) { showStatus(error.Message); return; }
         if (File.Exists(path) && !string.Equals(path, savePath, StringComparison.OrdinalIgnoreCase))
-        { showStatus("That level name already exists. Choose another name."); return; }
+        { showStatus("Name already used."); return; }
         data.Name = name;
         string previousPath = savePath;
         // Only this exact snapshot is saved after its fresh playtest reaches an exit.
@@ -562,7 +634,7 @@ public sealed class EditorMode : GameMode, IDisposable
             data.SaveAs(path, previousPath);
             savePath = path;
             levelNameInput.Text = data.Name;
-            showStatus("Congratulations! Level cleared and saved: " + path);
+            showStatus("Level saved: " + data.Name);
             return true;
         }
         catch (Exception error) when (error is IOException || error is UnauthorizedAccessException)
@@ -586,7 +658,7 @@ public sealed class EditorMode : GameMode, IDisposable
             spawn = proposed;
             snapshot = Capture();
         }
-        else showStatus("Spawn needs 8x12 pixels of clear space inside the level.");
+        else showStatus("Spawn blocked.");
     }
 
     private void CancelDrag()
@@ -604,12 +676,9 @@ public sealed class EditorMode : GameMode, IDisposable
         if (tool == Tool.Spawn) { TrySetSpawn(feet); return; }
         if (!ghostValid)
         {
-            showStatus(tool == Tool.Lightstick ? "Lightstick needs a background tile and clear space inside the level."
-                : tool == Tool.Door ? "Door needs terrain directly above and below its doorway."
-                : tool == Tool.Spike ? "Spike needs terrain, the top of a platform, or a solid moving-platform side behind its base."
-                : tool == Tool.Spring
-                ? "Spring needs clear space and solid terrain across its mounting base."
-                : "Object needs clear space inside the level and can't share a spot.");
+            showStatus(tool == Tool.Lightstick ? "Needs background."
+                : tool == Tool.Door ? "Needs floor and ceiling."
+                : tool is Tool.Spike or Tool.Spring ? "Needs support." : "Placement blocked.");
             return;
         }
         if (tool == Tool.Exit)
@@ -621,12 +690,12 @@ public sealed class EditorMode : GameMode, IDisposable
         else if (tool == Tool.Elevator && moving == null)
         {
             Point? destination = FindElevatorDestination(feet);
-            if (!destination.HasValue) { showStatus("Elevator pair needs room for a second door nearby. Clear space first."); return; }
+            if (!destination.HasValue) { showStatus("No room for the second door."); return; }
             string pairId = Guid.NewGuid().ToString("N");
             objects.Add(new LevelObject { Type = LevelObject.Elevator, X = feet.X, Y = feet.Y, PairId = pairId });
             objects.Add(new LevelObject { Type = LevelObject.Elevator, X = destination.Value.X, Y = destination.Value.Y,
                 PairId = pairId, IsDestination = true });
-            showStatus("Elevator pair created | Purple arrows connect both doors | Play: K at either door | Drag either door to move it");
+            ShowControls();
         }
         else if (moving != null)
         {
@@ -770,9 +839,9 @@ public sealed class EditorMode : GameMode, IDisposable
         if (!fits)
         {
             resizingPlatform.WidthTiles = previousWidth;
-            showStatus("Platform length blocked along its route.");
+            showStatus("Platform route blocked.");
         }
-        else showStatus($"Moving platform: {width} tiles | Drag either end to resize | Double-click final waypoint to finish");
+        else ShowControls();
         return true;
     }
 
@@ -784,13 +853,13 @@ public sealed class EditorMode : GameMode, IDisposable
             && Vector2.DistanceSquared(screen, pathClickPosition) <= 36f;
         if (pathDraft != null && (doubleClicked || Globals.Input.KeyJustDown(Keys.Enter)))
         {
-            if (!MovingRouteFits(pathDraft)) { showStatus("Route needs at least two points and clear space along every segment."); return; }
+            if (!MovingRouteFits(pathDraft)) { showStatus("Add a clear route with two points."); return; }
             if (pathOriginal != null) objects.Remove(pathOriginal);
             objects.Add(pathDraft);
             pathDraft = pathOriginal = null;
             pathClickAge = float.PositiveInfinity;
             snapshot = Capture();
-            showStatus("Moving platform route finished | Click a platform to edit its route.");
+            ShowControls();
             return;
         }
         if (pathDraft != null && (rightClicked || Globals.Input.KeyJustDown(Keys.Back)))
@@ -821,7 +890,7 @@ public sealed class EditorMode : GameMode, IDisposable
             }
             else if (MovingPointFits(feet, null))
                 pathDraft = new LevelObject { Type = LevelObject.MovingPlatform, X = feet.X, Y = feet.Y, WidthTiles = 3 };
-            else showStatus("Moving platform needs clear space inside the level.");
+            else showStatus("Platform blocked.");
             return;
         }
         var points = MovingPlatform.Route(pathDraft);
@@ -835,7 +904,7 @@ public sealed class EditorMode : GameMode, IDisposable
             pathClickAge = 0;
             pathClickPosition = screen;
         }
-        else if (clicked) showStatus("Path segment blocked: use a clear horizontal, vertical or diagonal route.");
+        else if (clicked) showStatus("Route blocked.");
     }
 
     private void PaintPlatformStroke(Point from, Point to, bool solid)
@@ -892,12 +961,12 @@ public sealed class EditorMode : GameMode, IDisposable
                 var next = ObjectRotation.Next(item.Type, item.Direction);
                 if (!ObjectFits(feet, item.Type, item, next))
                 {
-                    showStatus("Rotation blocked: clear space and a supported spring base are required.");
+                    showStatus("Rotation blocked.");
                     return;
                 }
                 item.Direction = next;
                 snapshot = Capture();
-                showStatus($"{item.Type}: {next} | R: rotate");
+                ShowControls();
                 return;
             }
         }
@@ -907,7 +976,7 @@ public sealed class EditorMode : GameMode, IDisposable
         if (tool == Tool.Spring) manualSpringDirection = true;
         if (ghost.HasValue)
             ghostValid = ObjectFits(ghost.Value, SelectedObjectType(), moving, ghostDirection);
-        showStatus($"{SelectedObjectType()}: {bounceDirection} | R: rotate");
+        ShowControls();
     }
 
     private static bool IsLauncher(string type) =>
@@ -1321,16 +1390,16 @@ public sealed class EditorMode : GameMode, IDisposable
         try
         {
             int width = preview.Width + columns, height = preview.Height + rows;
-            if (width < 2 || height < 2) { showStatus("Level needs at least 2 columns and 2 rows."); return; }
+            if (width < 2 || height < 2) { showStatus("Minimum size: 2 x 2."); return; }
             Rectangle levelBounds = new(0, 0, width * 8, height * 8);
             if (spawn.HasValue && !levelBounds.Contains(new Rectangle(spawn.Value.X - 4, spawn.Value.Y - 12, 8, 12)))
-            { showStatus("Move the player spawn inside the smaller level first."); return; }
+            { showStatus("Spawn is outside the new size."); return; }
             foreach (var item in objects)
             {
                 if (!levelBounds.Contains(ObjectBounds(new Point(item.X, item.Y), item.Type, item.Direction, item.WidthTiles))
                     || item.Type == LevelObject.MovingPlatform && item.Waypoints.Exists(point =>
                         !levelBounds.Contains(MovingPlatform.Bounds(new Point(point.X, point.Y), item.WidthTiles))))
-                { showStatus("Move or delete objects/routes at the edge before shrinking the level."); return; }
+                { showStatus("Objects or routes are outside the new size."); return; }
             }
             preview.Resize(width, height);
             background.Resize(width, height);
@@ -1338,7 +1407,7 @@ public sealed class EditorMode : GameMode, IDisposable
             snapshot = Capture();
             lastPaintCell = null;
             FitLevel();
-            showStatus($"Level: {preview.Width} x {preview.Height} tiles | Arrows resize by one tile | Ctrl+arrows: resize | F: fit");
+            showStatus($"Size: {preview.Width} x {preview.Height}");
         }
         catch (ArgumentOutOfRangeException error) { showStatus(error.Message); }
     }
